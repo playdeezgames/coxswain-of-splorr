@@ -61,7 +61,7 @@ counts_json :: proc(st: Store, project: string, milestone: string, by_milestone:
 			n[t.status] += 1
 		}
 	}
-	return fmt.tprintf(`{{"open":%d,"claimed":%d,"done":%d}}`, n[.Open], n[.Claimed], n[.Done])
+	return fmt.tprintf(`{{"open":%d,"claimed":%d,"done":%d,"cancelled":%d}}`, n[.Open], n[.Claimed], n[.Done], n[.Cancelled])
 }
 
 tool_project_create :: proc(s: ^Server, args: json.Object) -> Tool_Result {

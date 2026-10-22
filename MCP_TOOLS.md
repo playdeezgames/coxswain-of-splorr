@@ -10,9 +10,9 @@ Input schema: `{"type":"object","properties":{"title":{"type":"string"},"descrip
 
 ## `task_list`
 
-List tasks, optionally only those with a status (open, claimed, done), an assignee, a project or a milestone (milestone needs project). Each task is shown in full; blocked is true while a task it waits on is not done. Ordered by id, or with sort "priority" by priority (highest first, then id).
+List tasks, optionally only those with a status (open, claimed, done, cancelled), an assignee, a project or a milestone (milestone needs project). Each task is shown in full; blocked is true while a task it waits on is not done. Ordered by id, or with sort "priority" by priority (highest first, then id).
 
-Input schema: `{"type":"object","properties":{"status":{"type":"string","enum":["open","claimed","done"]},"assignee":{"type":"string"},"project":{"type":"string"},"milestone":{"type":"string"},"sort":{"type":"string","enum":["id","priority"]}}}`
+Input schema: `{"type":"object","properties":{"status":{"type":"string","enum":["open","claimed","done","cancelled"]},"assignee":{"type":"string"},"project":{"type":"string"},"milestone":{"type":"string"},"sort":{"type":"string","enum":["id","priority"]}}}`
 
 ## `task_next`
 
@@ -67,6 +67,30 @@ Input schema: `{"type":"object","properties":{"id":{"type":"integer"},"agent":{"
 Append a note to a task (a handoff, a finding, a question). Anyone may add one.
 
 Input schema: `{"type":"object","properties":{"id":{"type":"integer"},"text":{"type":"string"},"agent":{"type":"string"}},"required":["id","text"]}`
+
+## `task_block`
+
+Make a task wait for other tasks: adds the ids in blocked_by to its dependencies (ones it already has are kept once). Refuses unknown ids, the task itself, any dependency cycle, and a task that is done or cancelled. Cancelled tasks do not block.
+
+Input schema: `{"type":"object","properties":{"id":{"type":"integer"},"blocked_by":{"type":"array","items":{"type":"integer"}},"agent":{"type":"string"}},"required":["id","blocked_by"]}`
+
+## `task_unblock`
+
+Stop a task waiting for other tasks: removes the ids in blocked_by from its dependencies. Refuses an id the task does not depend on.
+
+Input schema: `{"type":"object","properties":{"id":{"type":"integer"},"blocked_by":{"type":"array","items":{"type":"integer"}},"agent":{"type":"string"}},"required":["id","blocked_by"]}`
+
+## `task_cancel`
+
+Drop a task that will not be done (status cancelled). Tasks are never deleted, so ids, history and notes stay. A cancelled task no longer blocks the tasks waiting on it. An open task may be cancelled by anyone; a claimed one only by its assignee unless force is true. An optional note says why.
+
+Input schema: `{"type":"object","properties":{"id":{"type":"integer"},"agent":{"type":"string"},"note":{"type":"string"},"force":{"type":"boolean"}},"required":["id"]}`
+
+## `task_reopen`
+
+Put a done or cancelled task back to open, unassigned, so it can be claimed again. Tasks waiting on it are blocked again if it was done. An optional note says why.
+
+Input schema: `{"type":"object","properties":{"id":{"type":"integer"},"agent":{"type":"string"},"note":{"type":"string"}},"required":["id"]}`
 
 ## `agent_register`
 

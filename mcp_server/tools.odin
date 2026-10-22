@@ -13,6 +13,7 @@ tools :: proc() -> []Tool {
 	sync.once_do(&once, proc() {
 		all.allocator = runtime.default_allocator() // (not a test's tracking allocator: this outlives the test)
 		append(&all, ..task_tools())
+		append(&all, ..lifecycle_tools())
 		append(&all, ..agent_tools())
 		append(&all, ..project_tools())
 	})
@@ -60,6 +61,8 @@ status_name :: proc(s: Status) -> string {
 		return "claimed"
 	case .Done:
 		return "done"
+	case .Cancelled:
+		return "cancelled"
 	}
 	return "?"
 }

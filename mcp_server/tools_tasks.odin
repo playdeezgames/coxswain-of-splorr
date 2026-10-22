@@ -14,8 +14,8 @@ task_tools :: proc() -> []Tool {
 		},
 		{
 			name = "task_list",
-			description = "List tasks, optionally only those with a status (open, claimed, done), an assignee, a project or a milestone (milestone needs project). Each task is shown in full; blocked is true while a task it waits on is not done. Ordered by id, or with sort \"priority\" by priority (highest first, then id).",
-			schema = `{"type":"object","properties":{"status":{"type":"string","enum":["open","claimed","done"]},"assignee":{"type":"string"},"project":{"type":"string"},"milestone":{"type":"string"},"sort":{"type":"string","enum":["id","priority"]}}}`,
+			description = "List tasks, optionally only those with a status (open, claimed, done, cancelled), an assignee, a project or a milestone (milestone needs project). Each task is shown in full; blocked is true while a task it waits on is not done. Ordered by id, or with sort \"priority\" by priority (highest first, then id).",
+			schema = `{"type":"object","properties":{"status":{"type":"string","enum":["open","claimed","done","cancelled"]},"assignee":{"type":"string"},"project":{"type":"string"},"milestone":{"type":"string"},"sort":{"type":"string","enum":["id","priority"]}}}`,
 			run = tool_task_list,
 		},
 		{
@@ -183,8 +183,8 @@ tasks := make([dynamic]Task, context.temp_allocator)
 tool_task_list :: proc(s: ^Server, args: json.Object) -> Tool_Result {
 	return with_store(s, proc(s: ^Server, st: ^Store, args: json.Object) -> (Tool_Result, bool) {
 			want_status, has_status := arg_string(args, "status")
-			if has_status && want_status != "open" && want_status != "claimed" && want_status != "done" {
-				return fail("status is open, claimed or done"), false
+			if has_status && want_status != "open" && want_status != "claimed" && want_status != "done" && want_status != "cancelled" {
+				return fail("status is open, claimed, done or cancelled"), false
 			}
 			want_who, has_who := arg_string(args, "assignee")
 			want_project, has_project := arg_string(args, "project")
@@ -323,6 +323,8 @@ tool_task_claim :: proc(s: ^Server, args: json.Object) -> Tool_Result {
 				return fail(fmt.tprintf("task %d is already claimed by %s", t.id, t.assignee)), false
 			case .Done:
 				return fail(fmt.tprintf("task %d is already done", t.id)), false
+			case .Cancelled:
+				return fail(fmt.tprintf("task %d is cancelled (task_reopen it first)", t.id)), false
 			case .Open:
 			}
 			if b, blocked := task_blocked_by_open(st^, t^); blocked {

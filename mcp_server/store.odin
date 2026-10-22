@@ -10,13 +10,14 @@ STORE_FILE :: "tasks.json"
 // The on-disk format version. Bump it when the format changes in a way an older server would misread,
 // and migrate older files in store_load. A file without "version" is version 0, the format before
 // versions existed; it is read as it is and gets the current version on its next save.
-STORE_VERSION :: 3 // 2: tasks have a priority; 3: tasks have a history (both absent = empty/0, so older files read as they are)
+STORE_VERSION :: 4 // 2: tasks have a priority; 3: tasks have a history; 4: status Cancelled (the rest absent = empty/0, so older files read as they are)
 LOCK_WAIT :: 15 * time.Second // how long a tool waits for the lock before refusing
 
 Status :: enum {
 	Open,
 	Claimed,
 	Done,
+	Cancelled, // dropped without being done; it no longer blocks anything
 }
 
 Note :: struct {
@@ -129,10 +130,10 @@ task_index :: proc(st: Store, id: int) -> int {
 	return -1
 }
 
-// A task is blocked while any task it names is not Done.
+// A task is blocked while any task it names is neither Done nor Cancelled.
 task_blocked_by_open :: proc(st: Store, t: Task) -> (id: int, blocked: bool) {
 	for b in t.blocked_by {
-		if i := task_index(st, b); i >= 0 && st.tasks[i].status != .Done {
+		if i := task_index(st, b); i >= 0 && st.tasks[i].status != .Done && st.tasks[i].status != .Cancelled {
 			return b, true
 		}
 	}

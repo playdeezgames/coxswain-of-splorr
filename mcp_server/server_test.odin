@@ -533,3 +533,104 @@ test_release_stale_is_recorded :: proc(t: ^testing.T) {
 	text, _ := call(&s, "task_history", `{"id":1}`)
 	testing.expect(t, strings.contains(text, `"action":"released"`) && strings.contains(text, "stale: bob"), text)
 }
+
+@(test)
+test_block_and_unblock :: proc(t: ^testing.T) {
+	s := temp_server("block", "alice")
+	defer {os.remove_all(s.dir); server_destroy(&s)}
+	for title in ([?]string{"a", "b", "c"}) {
+		call(&s, "task_create", fmt.tprintf(`{{"title":"%s"}}`, title))
+	}
+
+	text, bad := call(&s, "task_block", `{"id":2,"blocked_by":[1,1]}`)
+	testing.expect(t, !bad && strings.contains(text, `"blocked_by":[1]`) && strings.contains(text, `"blocked":true`), text)
+	text, bad = call(&s, "task_block", `{"id":2,"blocked_by":[1]}`)
+	testing.expect(t, !bad && strings.contains(text, `"blocked_by":[1]`), "repeats are kept once")
+	call(&s, "task_block", `{"id":3,"blocked_by":[2]}`)
+
+	text, bad = call(&s, "task_block", `{"id":1,"blocked_by":[1]}`)
+	testing.expect(t, bad && strings.contains(text, "itself"), text)
+	text, bad = call(&s, "task_block", `{"id":1,"blocked_by":[3]}`)
+	testing.expect(t, bad && strings.contains(text, "cycle"), text)
+	text, bad = call(&s, "task_block", `{"id":1,"blocked_by":[2]}`)
+	testing.expect(t, bad && strings.contains(text, "cycle"), text)
+	text, bad = call(&s, "task_block", `{"id":1,"blocked_by":[9]}`)
+	testing.expect(t, bad && strings.contains(text, "no task 9"), text)
+	_, bad = call(&s, "task_block", `{"id":1,"blocked_by":[]}`)
+	testing.expect(t, bad)
+	text, _ = call(&s, "task_get", `{"id":1}`)
+	testing.expect(t, strings.contains(text, `"blocked_by":[]`), "refused calls change nothing")
+
+	text, bad = call(&s, "task_claim", `{"id":3}`)
+	testing.expect(t, bad && strings.contains(text, "blocked"), text)
+	text, bad = call(&s, "task_unblock", `{"id":3,"blocked_by":[1]}`)
+	testing.expect(t, bad && strings.contains(text, "not blocked by task 1"), text)
+	text, bad = call(&s, "task_unblock", `{"id":3,"blocked_by":[2]}`)
+	testing.expect(t, !bad && strings.contains(text, `"blocked_by":[]`) && strings.contains(text, `"blocked":false`), text)
+	_, bad = call(&s, "task_claim", `{"id":3}`)
+	testing.expect(t, !bad)
+	// With the chain cut, the former cycle is fine.
+	_, bad = call(&s, "task_block", `{"id":1,"blocked_by":[3]}`)
+	testing.expect(t, !bad)
+
+	text, _ = call(&s, "task_history", `{"id":2}`)
+	testing.expect(t, strings.contains(text, `"action":"blocked"`) && strings.contains(text, `"detail":"by 1"`), text)
+
+	call(&s, "task_complete", `{"id":3}`)
+	text, bad = call(&s, "task_block", `{"id":3,"blocked_by":[2]}`)
+	testing.expect(t, bad && strings.contains(text, "is done"), text)
+}
+
+@(test)
+test_cancel_and_reopen :: proc(t: ^testing.T) {
+	s := temp_server("cancel", "alice")
+	defer {os.remove_all(s.dir); server_destroy(&s)}
+	call(&s, "task_create", `{"title":"a"}`)
+	call(&s, "task_create", `{"title":"b","blocked_by":[1]}`)
+	call(&s, "task_create", `{"title":"c"}`)
+
+	text, bad := call(&s, "task_reopen", `{"id":1}`)
+	testing.expect(t, bad && strings.contains(text, "not done or cancelled"), text)
+
+	// Cancelling an open task frees what waited on it.
+	text, bad = call(&s, "task_cancel", `{"id":1,"note":"not needed"}`)
+	testing.expect(t, !bad && strings.contains(text, `"status":"cancelled"`) && strings.contains(text, "not needed"), text)
+	text, _ = call(&s, "task_get", `{"id":2}`)
+	testing.expect(t, strings.contains(text, `"blocked":false`), text)
+	text, bad = call(&s, "task_claim", `{"id":1}`)
+	testing.expect(t, bad && strings.contains(text, "cancelled"), text)
+	text, bad = call(&s, "task_cancel", `{"id":1}`)
+	testing.expect(t, bad && strings.contains(text, "already cancelled"), text)
+	text, _ = call(&s, "task_list", `{"status":"cancelled"}`)
+	testing.expect(t, strings.contains(text, `"title":"a"`) && !strings.contains(text, `"title":"b"`), text)
+	text, _ = call(&s, "task_next", `{}`)
+	testing.expect(t, strings.contains(text, `"title":"b"`), "next skips the cancelled task")
+
+	// Reopening a cancelled task makes it claimable, and the dependent waits again.
+	text, bad = call(&s, "task_reopen", `{"id":1,"note":"needed after all"}`)
+	testing.expect(t, !bad && strings.contains(text, `"status":"open"`) && strings.contains(text, "needed after all"), text)
+	text, _ = call(&s, "task_get", `{"id":2}`)
+	testing.expect(t, strings.contains(text, `"blocked":true`), text)
+
+	// A claimed task is cancelled by its assignee, or by force.
+	call(&s, "task_claim", `{"id":3,"agent":"bob"}`)
+	text, bad = call(&s, "task_cancel", `{"id":3}`)
+	testing.expect(t, bad && strings.contains(text, "claimed by bob"), text)
+	text, bad = call(&s, "task_cancel", `{"id":3,"force":true}`)
+	testing.expect(t, !bad && strings.contains(text, `"assignee":""`), text)
+
+	// A done task is not cancelled but can be reopened (unassigned).
+	call(&s, "task_claim", `{"id":1}`)
+	call(&s, "task_complete", `{"id":1}`)
+	text, bad = call(&s, "task_cancel", `{"id":1}`)
+	testing.expect(t, bad && strings.contains(text, "is done"), text)
+	text, bad = call(&s, "task_reopen", `{"id":1}`)
+	testing.expect(t, !bad && strings.contains(text, `"assignee":""`) && strings.contains(text, `"status":"open"`), text)
+
+	text, _ = call(&s, "task_history", `{"id":1}`)
+	testing.expect(t, strings.contains(text, `"action":"cancelled"`) && strings.contains(text, `"detail":"was cancelled"`) && strings.contains(text, `"detail":"was done"`), text)
+	text, _ = call(&s, "project_create", `{"name":"p"}`)
+	call(&s, "task_move", `{"id":3,"project":"p"}`)
+	text, _ = call(&s, "project_list", `{}`)
+	testing.expect(t, strings.contains(text, `"cancelled":1`), text)
+}
