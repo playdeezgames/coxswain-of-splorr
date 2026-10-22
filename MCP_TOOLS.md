@@ -14,11 +14,17 @@ List tasks, optionally only those with a status (open, claimed, done), an assign
 
 Input schema: `{"type":"object","properties":{"status":{"type":"string","enum":["open","claimed","done"]},"assignee":{"type":"string"},"project":{"type":"string"},"milestone":{"type":"string"}}}`
 
+## `task_next`
+
+Show the next claimable task: the open task with the lowest id that no unfinished task blocks, optionally within a project or milestone (milestone needs project). With claim true it is also claimed for the agent (defaults to the server's --agent name), atomically. Says so, without failing, when nothing is claimable.
+
+Input schema: `{"type":"object","properties":{"project":{"type":"string"},"milestone":{"type":"string"},"claim":{"type":"boolean"},"agent":{"type":"string"}}}`
+
 ## `task_update`
 
-Change a task's title and/or description (give at least one; the title cannot be empty, the description can). Anyone may edit any task, in any status. Status, assignee, project and milestone have their own tools.
+Change a task's title and/or description (give at least one; the title cannot be empty, the description can). Anyone may edit any task, in any status. Status, assignee, project and milestone have their own tools. agent (else the server's --agent) is refreshed as a heartbeat if registered. agent (else the server's --agent) is refreshed as a heartbeat if registered.
 
-Input schema: `{"type":"object","properties":{"id":{"type":"integer"},"title":{"type":"string"},"description":{"type":"string"}},"required":["id"]}`
+Input schema: `{"type":"object","properties":{"id":{"type":"integer"},"title":{"type":"string"},"description":{"type":"string"},"agent":{"type":"string"}},"required":["id"]}`
 
 ## `task_move`
 
@@ -73,6 +79,12 @@ Input schema: `{"type":"object","properties":{"agent":{"type":"string"},"doing":
 List registered agents with seconds since each was last seen, whether it is active (seen within stale_after seconds, default 300), and the tasks it has claimed.
 
 Input schema: `{"type":"object","properties":{"stale_after":{"type":"integer"}}}`
+
+## `task_release_stale`
+
+Find claimed tasks whose assignee is registered but has not been seen for more than stale_after seconds (default 300), so a crashed session does not hold them forever. Without release it only lists them; with release true it gives each back (status open) and adds a note saying why. Claims by agents that are not registered are listed under unregistered and never released, since there is no last_seen to judge them by.
+
+Input schema: `{"type":"object","properties":{"stale_after":{"type":"integer"},"release":{"type":"boolean"},"agent":{"type":"string"}}}`
 
 ## `agent_unregister`
 

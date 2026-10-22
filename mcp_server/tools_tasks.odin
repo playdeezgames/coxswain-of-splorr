@@ -19,9 +19,15 @@ task_tools :: proc() -> []Tool {
 			run = tool_task_list,
 		},
 		{
+			name = "task_next",
+			description = "Show the next claimable task: the open task with the lowest id that no unfinished task blocks, optionally within a project or milestone (milestone needs project). With claim true it is also claimed for the agent (defaults to the server's --agent name), atomically. Says so, without failing, when nothing is claimable.",
+			schema = `{"type":"object","properties":{"project":{"type":"string"},"milestone":{"type":"string"},"claim":{"type":"boolean"},"agent":{"type":"string"}}}`,
+			run = tool_task_next,
+		},
+		{
 			name = "task_update",
-			description = "Change a task's title and/or description (give at least one; the title cannot be empty, the description can). Anyone may edit any task, in any status. Status, assignee, project and milestone have their own tools.",
-			schema = `{"type":"object","properties":{"id":{"type":"integer"},"title":{"type":"string"},"description":{"type":"string"}},"required":["id"]}`,
+			description = "Change a task's title and/or description (give at least one; the title cannot be empty, the description can). Anyone may edit any task, in any status. Status, assignee, project and milestone have their own tools. agent (else the server's --agent) is refreshed as a heartbeat if registered. agent (else the server's --agent) is refreshed as a heartbeat if registered.",
+			schema = `{"type":"object","properties":{"id":{"type":"integer"},"title":{"type":"string"},"description":{"type":"string"},"agent":{"type":"string"}},"required":["id"]}`,
 			run = tool_task_update,
 		},
 		{
@@ -169,6 +175,47 @@ tool_task_list :: proc(s: ^Server, args: json.Object) -> Tool_Result {
 		}, args)
 }
 
+tool_task_next :: proc(s: ^Server, args: json.Object) -> Tool_Result {
+	args := args
+	if arg_bool(args, "claim") {
+		agent, r, ok := acting_agent(s, args)
+		if !ok {
+			return r
+		}
+		args["agent"] = json.String(agent)
+	}
+	return with_store(s, proc(s: ^Server, st: ^Store, args: json.Object) -> (Tool_Result, bool) {
+			want_project, has_project := arg_string(args, "project")
+			want_ms, has_ms := arg_string(args, "milestone")
+			if has_ms && !has_project {
+				return fail("milestone needs project (milestone names are per project)"), false
+			}
+			for &t in st.tasks {
+				if t.status != .Open {
+					continue
+				}
+				if has_project && t.project != want_project {
+					continue
+				}
+				if has_ms && t.milestone != want_ms {
+					continue
+				}
+				if _, blocked := task_blocked_by_open(st^, t); blocked {
+					continue
+				}
+				if arg_bool(args, "claim") {
+					agent, _ := arg_string(args, "agent")
+					t.status = .Claimed
+					t.assignee = agent
+					refresh_agent(s, st, args)
+					return ok_result(task_json(st^, t)), true
+				}
+				return ok_result(task_json(st^, t)), false
+			}
+			return ok_result("no claimable task"), false
+		}, args)
+}
+
 tool_task_get :: proc(s: ^Server, args: json.Object) -> Tool_Result {
 	return with_store(s, proc(s: ^Server, st: ^Store, args: json.Object) -> (Tool_Result, bool) {
 			i, r, ok := find_task(st, args)
@@ -205,6 +252,7 @@ tool_task_claim :: proc(s: ^Server, args: json.Object) -> Tool_Result {
 			}
 			t.status = .Claimed
 			t.assignee = agent
+			refresh_agent(s, st, args)
 			return ok_result(task_json(st^, t^)), true
 		}, args)
 }
@@ -231,6 +279,7 @@ tool_task_release :: proc(s: ^Server, args: json.Object) -> Tool_Result {
 			}
 			t.status = .Open
 			t.assignee = ""
+			refresh_agent(s, st, args)
 			return ok_result(task_json(st^, t^)), true
 		}, args)
 }
@@ -259,6 +308,7 @@ tool_task_complete :: proc(s: ^Server, args: json.Object) -> Tool_Result {
 				append_note(t, agent, note)
 			}
 			t.status = .Done
+			refresh_agent(s, st, args)
 			return ok_result(task_json(st^, t^)), true
 		}, args)
 }
@@ -281,6 +331,7 @@ tool_task_note :: proc(s: ^Server, args: json.Object) -> Tool_Result {
 			}
 			agent, _ := arg_string(args, "agent")
 			append_note(&st.tasks[i], agent, text)
+			refresh_agent(s, st, args)
 			return ok_result(task_json(st^, st.tasks[i])), true
 		}, args)
 }
@@ -353,6 +404,7 @@ tool_task_update :: proc(s: ^Server, args: json.Object) -> Tool_Result {
 			if has_desc {
 				t.description = desc
 			}
+			refresh_agent(s, st, args)
 			return ok_result(task_json(st^, t^)), true
 		}, args)
 }

@@ -274,3 +274,127 @@ test_unreadable_store_is_refused :: proc(t: ^testing.T) {
 	text, bad = call(&s, "task_list", `{}`)
 	testing.expect(t, !bad, text)
 }
+
+@(test)
+test_task_next :: proc(t: ^testing.T) {
+	s := temp_server("next", "alice")
+	defer {os.remove_all(s.dir); server_destroy(&s)}
+
+	text, bad := call(&s, "task_next", `{}`)
+	testing.expect(t, !bad && strings.contains(text, "no claimable"), text)
+
+	call(&s, "project_create", `{"name":"p"}`)
+	call(&s, "task_create", `{"title":"first"}`)
+	call(&s, "task_create", `{"title":"second","blocked_by":[1]}`)
+	call(&s, "task_create", `{"title":"third","project":"p"}`)
+
+	text, _ = call(&s, "task_next", `{}`)
+	testing.expect(t, strings.contains(text, `"title":"first"`), text)
+	text, _ = call(&s, "task_next", `{}`)
+	testing.expect(t, strings.contains(text, `"status":"open"`), "peeking does not claim")
+	text, _ = call(&s, "task_next", `{"project":"p"}`)
+	testing.expect(t, strings.contains(text, `"title":"third"`), text)
+	text, bad = call(&s, "task_next", `{"milestone":"m"}`)
+	testing.expect(t, bad, "milestone needs project")
+
+	text, bad = call(&s, "task_next", `{"claim":true}`)
+	testing.expect(t, !bad && strings.contains(text, `"title":"first"`) && strings.contains(text, `"assignee":"alice"`), text)
+	text, _ = call(&s, "task_next", `{"claim":true,"agent":"bob"}`)
+	testing.expect(t, strings.contains(text, `"title":"third"`) && strings.contains(text, `"assignee":"bob"`), "second is still blocked by the claimed first")
+	text, _ = call(&s, "task_next", `{}`)
+	testing.expect(t, strings.contains(text, "no claimable"), text)
+}
+
+// Any successful task tool that names a registered agent counts as a heartbeat; nothing registers one.
+@(test)
+test_task_calls_refresh_last_seen :: proc(t: ^testing.T) {
+	s := temp_server("refresh", "alice")
+	defer {os.remove_all(s.dir); server_destroy(&s)}
+
+	call(&s, "task_create", `{"title":"a"}`)
+	call(&s, "task_create", `{"title":"b"}`)
+	call(&s, "task_claim", `{"id":1}`)
+	text, _ := call(&s, "agent_list", `{}`)
+	testing.expect(t, text == "[]", "claiming does not register an agent")
+
+	call(&s, "agent_register", `{}`)
+	age_alice :: proc(s: ^Server) {
+		testing.expect(nil, store_lock(s))
+		st, _ := store_load(s)
+		st.agents[0].last_seen -= 1000
+		store_save(s, st)
+		store_unlock(s)
+	}
+	fresh :: proc(s: ^Server) -> bool {
+		text, _ := call(s, "agent_list", `{}`)
+		return strings.contains(text, `"active":true`)
+	}
+
+	calls := [?]struct {
+		tool, args: string,
+	}{
+		{"task_note", `{"id":1,"text":"hi"}`},
+		{"task_update", `{"id":1,"title":"a2"}`},
+		{"task_release", `{"id":1}`},
+		{"task_claim", `{"id":1}`},
+		{"task_complete", `{"id":1}`},
+		{"task_next", `{"claim":true}`},
+	}
+	for c in calls {
+		age_alice(&s)
+		testing.expect(t, !fresh(&s), c.tool)
+		_, bad := call(&s, c.tool, c.args)
+		testing.expect(t, !bad, c.tool)
+		testing.expect(t, fresh(&s), c.tool)
+	}
+
+	// A refused call does not count, and someone else's call does not touch alice.
+	age_alice(&s)
+	_, bad := call(&s, "task_claim", `{"id":2,"agent":"bob"}`)
+	testing.expect(t, !fresh(&s), "bob's claim leaves alice alone")
+	_, bad = call(&s, "task_claim", `{"id":2}`)
+	testing.expect(t, bad && !fresh(&s), "a refused claim is not a heartbeat")
+}
+
+@(test)
+test_release_stale :: proc(t: ^testing.T) {
+	s := temp_server("stale", "alice")
+	defer {os.remove_all(s.dir); server_destroy(&s)}
+
+	for title in ([?]string{"a", "b", "c", "d"}) {
+		call(&s, "task_create", fmt.tprintf(`{{"title":"%s"}}`, title))
+	}
+	call(&s, "agent_register", `{}`)
+	call(&s, "agent_register", `{"agent":"bob"}`)
+	call(&s, "task_claim", `{"id":1}`)
+	call(&s, "task_claim", `{"id":2,"agent":"bob"}`)
+	call(&s, "task_claim", `{"id":3,"agent":"ghost"}`) // never registered
+	{
+		testing.expect(t, store_lock(&s))
+		st, _ := store_load(&s)
+		st.agents[1].last_seen -= 1000 // bob is stale, alice is not
+		store_save(&s, st)
+		store_unlock(&s)
+	}
+
+	text, bad := call(&s, "task_release_stale", `{}`)
+	testing.expect(t, !bad && strings.contains(text, `"released":false`) && strings.contains(text, `"id":2`) && !strings.contains(text, `"id":1`), text)
+	testing.expect(t, strings.contains(text, `"unregistered":[3]`), text)
+	text, _ = call(&s, "task_get", `{"id":2}`)
+	testing.expect(t, strings.contains(text, `"status":"claimed"`), "listing does not release")
+
+	text, bad = call(&s, "task_release_stale", `{"stale_after":-1}`)
+	testing.expect(t, bad, text)
+
+	text, bad = call(&s, "task_release_stale", `{"release":true}`)
+	testing.expect(t, !bad && strings.contains(text, `"released":true`), text)
+	text, _ = call(&s, "task_get", `{"id":2}`)
+	testing.expect(t, strings.contains(text, `"status":"open"`) && strings.contains(text, "released: bob"), text)
+	text, _ = call(&s, "task_get", `{"id":1}`)
+	testing.expect(t, strings.contains(text, `"status":"claimed"`), "alice is fresh")
+	text, _ = call(&s, "task_get", `{"id":3}`)
+	testing.expect(t, strings.contains(text, `"status":"claimed"`), "unregistered claims stay")
+
+	text, _ = call(&s, "task_release_stale", `{"release":true}`)
+	testing.expect(t, strings.contains(text, `"stale":[]`), text)
+}

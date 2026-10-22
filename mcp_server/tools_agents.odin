@@ -28,6 +28,12 @@ agent_tools :: proc() -> []Tool {
 			run = tool_agent_list,
 		},
 		{
+			name = "task_release_stale",
+			description = "Find claimed tasks whose assignee is registered but has not been seen for more than stale_after seconds (default 300), so a crashed session does not hold them forever. Without release it only lists them; with release true it gives each back (status open) and adds a note saying why. Claims by agents that are not registered are listed under unregistered and never released, since there is no last_seen to judge them by.",
+			schema = `{"type":"object","properties":{"stale_after":{"type":"integer"},"release":{"type":"boolean"},"agent":{"type":"string"}}}`,
+			run = tool_task_release_stale,
+		},
+		{
 			name = "agent_unregister",
 			description = "Remove an agent from the registry. Its claimed tasks stay claimed (release them first, or another agent can release with force).",
 			schema = `{"type":"object","properties":{"agent":{"type":"string"}}}`,
@@ -70,6 +76,18 @@ touch_agent :: proc(st: ^Store, name: string, doing: string, has_doing: bool, cr
 		st.agents[i].doing = doing
 	}
 	return i, true
+}
+
+// Counts a tool call as a heartbeat for the agent it names (args.agent, else the server's --agent),
+// if that agent is registered. Never registers anyone. Call it only on a path that saves.
+refresh_agent :: proc(s: ^Server, st: ^Store, args: json.Object) {
+	name, _ := arg_string(args, "agent")
+	if name == "" {
+		name = s.agent
+	}
+	if name != "" {
+		touch_agent(st, name, "", false, false)
+	}
 }
 
 with_agent :: proc(s: ^Server, args: json.Object, body: proc(s: ^Server, st: ^Store, args: json.Object) -> (Tool_Result, bool)) -> Tool_Result {
@@ -140,4 +158,54 @@ tool_agent_unregister :: proc(s: ^Server, args: json.Object) -> Tool_Result {
 			st.agents = kept[:]
 			return ok_result(fmt.tprintf("%s unregistered", name)), true
 		})
+}
+
+tool_task_release_stale :: proc(s: ^Server, args: json.Object) -> Tool_Result {
+	return with_store(s, proc(s: ^Server, st: ^Store, args: json.Object) -> (Tool_Result, bool) {
+			stale := DEFAULT_STALE_SECONDS
+			if _, has := args["stale_after"]; has {
+				v, ok := arg_int(args, "stale_after")
+				if !ok || v < 0 {
+					return fail("stale_after is a number of seconds (0 or more)"), false
+				}
+				stale = v
+			}
+			release := arg_bool(args, "release")
+			who, _ := arg_string(args, "agent")
+			if who == "" {
+				who = s.agent
+			}
+			author := who != "" ? who : "system"
+			now := now_unix()
+			stale_b := strings.builder_make(context.temp_allocator)
+			unreg_b := strings.builder_make(context.temp_allocator)
+			n_stale, n_unreg := 0, 0
+			for &t in st.tasks {
+				if t.status != .Claimed {
+					continue
+				}
+				ai := agent_index(st^, t.assignee)
+				if ai < 0 {
+					fmt.sbprintf(&unreg_b, "%s%d", n_unreg > 0 ? "," : "", t.id)
+					n_unreg += 1
+					continue
+				}
+				age := max(now - st.agents[ai].last_seen, 0)
+				if age <= i64(stale) {
+					continue
+				}
+				fmt.sbprintf(&stale_b, `%s{{"id":%d,"title":%s,"assignee":%s,"seconds_since_seen":%d}}`, n_stale > 0 ? "," : "", t.id, quote(t.title), quote(t.assignee), age)
+				n_stale += 1
+				if release {
+					append_note(&t, author, fmt.tprintf("released: %s was not seen for %d seconds (more than %d)", t.assignee, age, stale))
+					t.status = .Open
+					t.assignee = ""
+				}
+			}
+			if release {
+				refresh_agent(s, st, args)
+			}
+			out := fmt.tprintf(`{{"released":%v,"stale":[%s],"unregistered":[%s]}}`, release, strings.to_string(stale_b), strings.to_string(unreg_b))
+			return ok_result(out), release && n_stale > 0
+		}, args)
 }
