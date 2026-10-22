@@ -121,3 +121,67 @@ test_agent_heartbeat :: proc(t: ^testing.T) {
 	text, _ = call(&s, "agent_list", `{}`)
 	testing.expect(t, text == "[]", text)
 }
+
+@(test)
+test_projects_and_milestones :: proc(t: ^testing.T) {
+	s := temp_server("projects", "alice")
+	defer {os.remove_all(s.dir); server_destroy(&s)}
+
+	text, bad := call(&s, "task_create", `{"title":"x","project":"nope"}`)
+	testing.expect(t, bad && strings.contains(text, "no project nope"), text)
+
+	_, bad = call(&s, "project_create", `{"name":"web"}`)
+	testing.expect(t, !bad)
+	text, bad = call(&s, "project_create", `{"name":"web"}`)
+	testing.expect(t, bad && strings.contains(text, "already exists"), text)
+	text, bad = call(&s, "milestone_create", `{"project":"nope","name":"m1"}`)
+	testing.expect(t, bad, text)
+	_, bad = call(&s, "milestone_create", `{"project":"web","name":"m1"}`)
+	testing.expect(t, !bad)
+	_, bad = call(&s, "milestone_create", `{"project":"web","name":"m2"}`)
+	testing.expect(t, !bad)
+	text, bad = call(&s, "milestone_create", `{"project":"web","name":"m1"}`)
+	testing.expect(t, bad, "duplicate milestone in a project is refused")
+
+	text, bad = call(&s, "task_create", `{"title":"a","project":"web","milestone":"m1"}`)
+	testing.expect(t, !bad && strings.contains(text, `"milestone":"m1"`), text)
+	text, bad = call(&s, "task_create", `{"title":"b","milestone":"m1"}`)
+	testing.expect(t, bad && strings.contains(text, "needs a project"), text)
+	text, bad = call(&s, "task_create", `{"title":"c","project":"web","milestone":"zzz"}`)
+	testing.expect(t, bad && strings.contains(text, "no milestone zzz"), text)
+	call(&s, "task_create", `{"title":"loose"}`)
+
+	text, _ = call(&s, "task_list", `{"project":"web"}`)
+	testing.expect(t, strings.contains(text, `"title":"a"`) && !strings.contains(text, "loose"), text)
+	text, bad = call(&s, "task_list", `{"milestone":"m1"}`)
+	testing.expect(t, bad, "milestone filter needs a project")
+
+	// Moving: only milestone keeps the project; a new project clears the milestone.
+	text, bad = call(&s, "task_move", `{"id":1,"milestone":"m2"}`)
+	testing.expect(t, !bad && strings.contains(text, `"milestone":"m2"`), text)
+	text, bad = call(&s, "task_move", `{"id":2,"project":"web","milestone":"m1"}`)
+	testing.expect(t, !bad && strings.contains(text, `"project":"web"`), text)
+	text, bad = call(&s, "task_move", `{"id":2,"milestone":""}`)
+	testing.expect(t, !bad && strings.contains(text, `"milestone":""`) && strings.contains(text, `"project":"web"`), text)
+	call(&s, "project_create", `{"name":"other"}`)
+	text, bad = call(&s, "task_move", `{"id":1,"project":"other"}`)
+	testing.expect(t, !bad && strings.contains(text, `"milestone":""`), text)
+	text, bad = call(&s, "task_move", `{"id":1,"project":""}`)
+	testing.expect(t, !bad && strings.contains(text, `"project":""`), text)
+
+	text, _ = call(&s, "project_list", `{}`)
+	testing.expect(t, strings.contains(text, `"name":"web"`) && strings.contains(text, `"open":1`), text)
+
+	text, bad = call(&s, "milestone_create", `{"project":"web","name":"m3"}`)
+	call(&s, "task_move", `{"id":1,"project":"web","milestone":"m3"}`)
+	text, bad = call(&s, "milestone_delete", `{"project":"web","name":"m3"}`)
+	testing.expect(t, bad && strings.contains(text, "still has 1"), text)
+	text, bad = call(&s, "project_delete", `{"name":"web"}`)
+	testing.expect(t, bad && strings.contains(text, "still has"), text)
+	call(&s, "task_move", `{"id":1,"project":""}`)
+	call(&s, "task_move", `{"id":2,"project":""}`)
+	_, bad = call(&s, "project_delete", `{"name":"web"}`)
+	testing.expect(t, !bad)
+	text, _ = call(&s, "project_list", `{}`)
+	testing.expect(t, !strings.contains(text, "m1"), "milestones go with their project")
+}

@@ -8,15 +8,21 @@ task_tools :: proc() -> []Tool {
 	@(static) table := [?]Tool {
 		{
 			name = "task_create",
-			description = "Create a task (status open). blocked_by lists ids of tasks that must be done before it can be claimed. Returns the new task.",
-			schema = `{"type":"object","properties":{"title":{"type":"string"},"description":{"type":"string"},"blocked_by":{"type":"array","items":{"type":"integer"}}},"required":["title"]}`,
+			description = "Create a task (status open), optionally in a project (which must exist) and a milestone of that project. blocked_by lists ids of tasks that must be done before it can be claimed. Returns the new task.",
+			schema = `{"type":"object","properties":{"title":{"type":"string"},"description":{"type":"string"},"blocked_by":{"type":"array","items":{"type":"integer"}},"project":{"type":"string"},"milestone":{"type":"string"}},"required":["title"]}`,
 			run = tool_task_create,
 		},
 		{
 			name = "task_list",
-			description = "List tasks, optionally only those with a status (open, claimed, done) or an assignee. Each task is shown in full; blocked is true while a task it waits on is not done.",
-			schema = `{"type":"object","properties":{"status":{"type":"string","enum":["open","claimed","done"]},"assignee":{"type":"string"}}}`,
+			description = "List tasks, optionally only those with a status (open, claimed, done), an assignee, a project or a milestone (milestone needs project). Each task is shown in full; blocked is true while a task it waits on is not done.",
+			schema = `{"type":"object","properties":{"status":{"type":"string","enum":["open","claimed","done"]},"assignee":{"type":"string"},"project":{"type":"string"},"milestone":{"type":"string"}}}`,
 			run = tool_task_list,
+		},
+		{
+			name = "task_move",
+			description = "Put a task in a project and optionally one of its milestones, or take it out. Giving project replaces the placement (the milestone is cleared unless given too); giving only milestone keeps the task's project. An empty string clears: project \"\" removes it from its project and milestone, milestone \"\" removes it from its milestone.",
+			schema = `{"type":"object","properties":{"id":{"type":"integer"},"project":{"type":"string"},"milestone":{"type":"string"}},"required":["id"]}`,
+			run = tool_task_move,
 		},
 		{
 			name = "task_get",
@@ -99,11 +105,18 @@ tool_task_create :: proc(s: ^Server, args: json.Object) -> Tool_Result {
 					append(&deps, id)
 				}
 			}
+			project, _ := arg_string(args, "project")
+			milestone, _ := arg_string(args, "milestone")
+			if r, ok := check_placement(st^, project, milestone); !ok {
+				return r, false
+			}
 			t := Task {
 				id          = st.next_id,
 				title       = title,
 				description = desc,
 				blocked_by  = deps[:],
+				project     = project,
+				milestone   = milestone,
 			}
 			st.next_id += 1
 			tasks := make([dynamic]Task, context.temp_allocator)
@@ -121,6 +134,11 @@ tool_task_list :: proc(s: ^Server, args: json.Object) -> Tool_Result {
 				return fail("status is open, claimed or done"), false
 			}
 			want_who, has_who := arg_string(args, "assignee")
+			want_project, has_project := arg_string(args, "project")
+			want_ms, has_ms := arg_string(args, "milestone")
+			if has_ms && !has_project {
+				return fail("milestone needs project (milestone names are per project)"), false
+			}
 			b := strings.builder_make(context.temp_allocator)
 			strings.write_string(&b, "[")
 			n := 0
@@ -129,6 +147,12 @@ tool_task_list :: proc(s: ^Server, args: json.Object) -> Tool_Result {
 					continue
 				}
 				if has_who && t.assignee != want_who {
+					continue
+				}
+				if has_project && t.project != want_project {
+					continue
+				}
+				if has_ms && t.milestone != want_ms {
 					continue
 				}
 				fmt.sbprintf(&b, "%s%s", n > 0 ? "," : "", task_json(st^, t))
@@ -252,5 +276,52 @@ tool_task_note :: proc(s: ^Server, args: json.Object) -> Tool_Result {
 			agent, _ := arg_string(args, "agent")
 			append_note(&st.tasks[i], agent, text)
 			return ok_result(task_json(st^, st.tasks[i])), true
+		}, args)
+}
+
+// A project and milestone a task may be placed in: both empty, or an existing project with the
+// milestone empty or one of its milestones.
+check_placement :: proc(st: Store, project, milestone: string) -> (res: Tool_Result, ok: bool) {
+	if project == "" {
+		if milestone != "" {
+			return fail("a milestone needs a project"), false
+		}
+		return {}, true
+	}
+	if project_index(st, project) < 0 {
+		return fail(fmt.tprintf("no project %s", project)), false
+	}
+	if milestone != "" && milestone_index(st, project, milestone) < 0 {
+		return fail(fmt.tprintf("project %s has no milestone %s", project, milestone)), false
+	}
+	return {}, true
+}
+
+tool_task_move :: proc(s: ^Server, args: json.Object) -> Tool_Result {
+	return with_store(s, proc(s: ^Server, st: ^Store, args: json.Object) -> (Tool_Result, bool) {
+			i, r, ok := find_task(st, args)
+			if !ok {
+				return r, false
+			}
+			project, has_project := arg_string(args, "project")
+			milestone, has_ms := arg_string(args, "milestone")
+			if !has_project && !has_ms {
+				return fail("give project and/or milestone (an empty string clears)"), false
+			}
+			t := &st.tasks[i]
+			if !has_project {
+				project = t.project
+			} else if project != t.project && !has_ms {
+				milestone = "" // a new project: the old milestone no longer applies
+			}
+			if has_project && project == "" {
+				milestone = ""
+			}
+			if r, ok := check_placement(st^, project, milestone); !ok {
+				return r, false
+			}
+			t.project = project
+			t.milestone = milestone
+			return ok_result(task_json(st^, t^)), true
 		}, args)
 }

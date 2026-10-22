@@ -30,6 +30,21 @@ Task :: struct {
 	assignee:    string,
 	blocked_by:  []int,
 	notes:       []Note,
+	project:     string, // "" = in no project
+	milestone:   string, // "" = in no milestone; only meaningful (and only allowed) with a project
+}
+
+// A project groups tasks. Projects are named, never numbered.
+Project :: struct {
+	name:        string,
+	description: string,
+}
+
+// A milestone belongs to one project; its name is unique within that project.
+Milestone :: struct {
+	project:     string,
+	name:        string,
+	description: string,
 }
 
 // A registered session or agent. last_seen is seconds since 1970, set by registering or a heartbeat.
@@ -44,6 +59,8 @@ Store :: struct {
 	next_id: int,
 	tasks:   []Task,
 	agents:  []Agent,
+	projects:   []Project,
+	milestones: []Milestone,
 }
 
 store_path :: proc(s: ^Server, name: string) -> string {
@@ -140,4 +157,22 @@ agent_index :: proc(st: Store, name: string) -> int {
 
 now_unix :: proc() -> i64 {
 	return i64(time.to_unix_seconds(time.now()))
+}
+
+project_index :: proc(st: Store, name: string) -> int {
+	for p, i in st.projects {
+		if p.name == name {
+			return i
+		}
+	}
+	return -1
+}
+
+milestone_index :: proc(st: Store, project, name: string) -> int {
+	for m, i in st.milestones {
+		if m.project == project && m.name == name {
+			return i
+		}
+	}
+	return -1
 }
