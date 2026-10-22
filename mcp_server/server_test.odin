@@ -634,3 +634,39 @@ test_cancel_and_reopen :: proc(t: ^testing.T) {
 	text, _ = call(&s, "project_list", `{}`)
 	testing.expect(t, strings.contains(text, `"cancelled":1`), text)
 }
+
+@(test)
+test_size_caps :: proc(t: ^testing.T) {
+	s := temp_server("caps", "alice")
+	defer server_destroy(&s)
+	long :: proc(n: int) -> string {
+		return strings.repeat("x", n, context.temp_allocator)
+	}
+
+	text, bad := call(&s, "task_create", fmt.tprintf(`{{"title":"%s"}}`, long(MAX_TITLE + 1)))
+	testing.expect(t, bad && strings.contains(text, "title") && strings.contains(text, "limit"), text)
+	text, bad = call(&s, "task_create", fmt.tprintf(`{{"title":"%s","description":"%s"}}`, long(MAX_TITLE), long(MAX_DESCRIPTION)))
+	testing.expect(t, !bad, "exactly at the limits is fine")
+	text, bad = call(&s, "task_create", fmt.tprintf(`{{"title":"a","description":"%s"}}`, long(MAX_DESCRIPTION + 1)))
+	testing.expect(t, bad && strings.contains(text, "description"), text)
+	text, bad = call(&s, "task_update", fmt.tprintf(`{{"id":1,"title":"%s"}}`, long(MAX_TITLE + 1)))
+	testing.expect(t, bad && strings.contains(text, "title"), text)
+
+	text, bad = call(&s, "task_note", fmt.tprintf(`{{"id":1,"text":"%s"}}`, long(MAX_NOTE + 1)))
+	testing.expect(t, bad && strings.contains(text, "note"), text)
+	for _ in 0 ..< MAX_NOTES_PER_TASK {
+		call(&s, "task_note", `{"id":1,"text":"n"}`)
+	}
+	text, bad = call(&s, "task_note", `{"id":1,"text":"one too many"}`)
+	testing.expect(t, bad && strings.contains(text, "notes"), text)
+	call(&s, "task_claim", `{"id":1}`)
+	text, bad = call(&s, "task_complete", `{"id":1,"note":"also too many"}`)
+	testing.expect(t, bad, text)
+
+	text, bad = call(&s, "project_create", fmt.tprintf(`{{"name":"p","description":"%s"}}`, long(MAX_DESCRIPTION + 1)))
+	testing.expect(t, bad && strings.contains(text, "description"), text)
+	text, bad = call(&s, "agent_register", fmt.tprintf(`{{"doing":"%s"}}`, long(MAX_DOING + 1)))
+	testing.expect(t, bad && strings.contains(text, "doing"), text)
+	text, bad = call(&s, "agent_register", fmt.tprintf(`{{"agent":"%s"}}`, long(MAX_AGENT_NAME + 1)))
+	testing.expect(t, bad && strings.contains(text, "agent name"), text)
+}

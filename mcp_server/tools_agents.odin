@@ -104,6 +104,15 @@ tool_agent_register :: proc(s: ^Server, args: json.Object) -> Tool_Result {
 	return with_agent(s, args, proc(s: ^Server, st: ^Store, args: json.Object) -> (Tool_Result, bool) {
 			name, _ := arg_string(args, "agent")
 			doing, has := arg_string(args, "doing")
+			if r, ok := too_long("doing", doing, MAX_DOING); !ok {
+				return r, false
+			}
+			if r, ok := too_long("agent name", name, MAX_AGENT_NAME); !ok {
+				return r, false
+			}
+			if agent_index(st^, name) < 0 && len(st.agents) >= MAX_AGENTS {
+				return fail(fmt.tprintf("%d agents are already registered, the limit", MAX_AGENTS)), false
+			}
 			i, _ := touch_agent(st, name, doing, has, true)
 			return ok_result(agent_json(st^, st.agents[i], DEFAULT_STALE_SECONDS, now_unix())), true
 		})
@@ -113,6 +122,9 @@ tool_agent_heartbeat :: proc(s: ^Server, args: json.Object) -> Tool_Result {
 	return with_agent(s, args, proc(s: ^Server, st: ^Store, args: json.Object) -> (Tool_Result, bool) {
 			name, _ := arg_string(args, "agent")
 			doing, has := arg_string(args, "doing")
+			if r, ok := too_long("doing", doing, MAX_DOING); !ok {
+				return r, false
+			}
 			i, ok := touch_agent(st, name, doing, has, false)
 			if !ok {
 				return fail(fmt.tprintf("%s is not registered (call agent_register first)", name)), false

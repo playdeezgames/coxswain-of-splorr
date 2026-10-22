@@ -134,7 +134,16 @@ tool_task_create :: proc(s: ^Server, args: json.Object) -> Tool_Result {
 			if strings.trim_space(title) == "" {
 				return fail("title is empty"), false
 			}
+			if r, ok := too_long("title", title, MAX_TITLE); !ok {
+				return r, false
+			}
 			desc, _ := arg_string(args, "description")
+			if r, ok := too_long("description", desc, MAX_DESCRIPTION); !ok {
+				return r, false
+			}
+			if len(st.tasks) >= MAX_TASKS {
+				return fail(fmt.tprintf("the store already has %d tasks, the limit", MAX_TASKS)), false
+			}
 			deps := make([dynamic]int, context.temp_allocator)
 			if raw, has := args["blocked_by"]; has {
 				arr, is_arr := raw.(json.Array)
@@ -391,6 +400,9 @@ tool_task_complete :: proc(s: ^Server, args: json.Object) -> Tool_Result {
 				return fail(fmt.tprintf("task %d is claimed by %s, not %s (force true overrides)", t.id, t.assignee, agent)), false
 			}
 			if note, has := arg_string(args, "note"); has && note != "" {
+				if r, ok := check_note(t^, note); !ok {
+					return r, false
+				}
 				append_note(t, agent, note)
 			}
 			detail := ""
@@ -419,6 +431,9 @@ tool_task_note :: proc(s: ^Server, args: json.Object) -> Tool_Result {
 			text, r2, ok2 := need_string(args, "text")
 			if !ok2 {
 				return r2, false
+			}
+			if r, ok := check_note(st.tasks[i], text); !ok {
+				return r, false
 			}
 			agent, _ := arg_string(args, "agent")
 			append_note(&st.tasks[i], agent, text)
@@ -494,6 +509,12 @@ tool_task_update :: proc(s: ^Server, args: json.Object) -> Tool_Result {
 			}
 			if has_title && strings.trim_space(title) == "" {
 				return fail("title is empty"), false
+			}
+			if r, ok := too_long("title", title, MAX_TITLE); !ok {
+				return r, false
+			}
+			if r, ok := too_long("description", desc, MAX_DESCRIPTION); !ok {
+				return r, false
 			}
 			t := &st.tasks[i]
 			changed := make([dynamic]string, context.temp_allocator)

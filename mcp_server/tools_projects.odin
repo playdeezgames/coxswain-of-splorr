@@ -77,6 +77,9 @@ tool_project_create :: proc(s: ^Server, args: json.Object) -> Tool_Result {
 				return fail(fmt.tprintf("project %s already exists", name)), false
 			}
 			desc, _ := arg_string(args, "description")
+			if r, ok := too_long("description", desc, MAX_DESCRIPTION); !ok {
+				return r, false
+			}
 			list := make([dynamic]Project, context.temp_allocator)
 			append(&list, ..st.projects)
 			append(&list, Project{name, desc})
@@ -161,6 +164,9 @@ tool_milestone_create :: proc(s: ^Server, args: json.Object) -> Tool_Result {
 				return fail(fmt.tprintf("project %s already has a milestone %s", project, name)), false
 			}
 			desc, _ := arg_string(args, "description")
+			if r, ok := too_long("description", desc, MAX_DESCRIPTION); !ok {
+				return r, false
+			}
 			list := make([dynamic]Milestone, context.temp_allocator)
 			append(&list, ..st.milestones)
 			append(&list, Milestone{project, name, desc})

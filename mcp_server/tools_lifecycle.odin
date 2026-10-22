@@ -187,6 +187,9 @@ tool_task_cancel :: proc(s: ^Server, args: json.Object) -> Tool_Result {
 				detail = fmt.tprintf("forced; was claimed by %s", t.assignee)
 			}
 			if note, has := arg_string(args, "note"); has && note != "" {
+				if r, ok := check_note(t^, note); !ok {
+					return r, false
+				}
 				append_note(t, who, note)
 			}
 			t.status = .Cancelled
@@ -209,6 +212,9 @@ tool_task_reopen :: proc(s: ^Server, args: json.Object) -> Tool_Result {
 				return fail(fmt.tprintf("task %d is %s, not done or cancelled", t.id, status_name(t.status))), false
 			}
 			if note, has := arg_string(args, "note"); has && note != "" {
+				if r, ok := check_note(t^, note); !ok {
+					return r, false
+				}
 				append_note(t, who, note)
 			}
 			record(t, who, "reopened", fmt.tprintf("was %s", status_name(t.status)))
