@@ -18,7 +18,7 @@ case "${1:-test}" in
 	install-mcp)
 		bin="${COXSWAIN_PREFIX:-$HOME/.local/bin}"
 		tasks="${COXSWAIN_TASKS:-$HOME/coxswain-tasks}"
-		version="$(git rev-parse --short HEAD 2>/dev/null || echo dev)"
+		version="g$(git rev-parse --short HEAD 2>/dev/null || echo dev)" # (the "g" keeps an all-digit revision from being read as a number)
 		mkdir -p build "$bin" "$tasks"
 		odin build coxswain_mcp -out:build/coxswain_mcp-prod -define:COXSWAIN_VERSION="$version"
 		cp build/coxswain_mcp-prod "$bin/.coxswain_mcp.new" && mv -f "$bin/.coxswain_mcp.new" "$bin/coxswain_mcp"
