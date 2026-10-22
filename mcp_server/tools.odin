@@ -39,7 +39,7 @@ with_store :: proc(s: ^Server, body: proc(s: ^Server, st: ^Store, args: json.Obj
 
 task_json :: proc(st: Store, t: Task) -> string {
 	b := strings.builder_make(context.temp_allocator)
-	fmt.sbprintf(&b, `{{"id":%d,"title":%s,"description":%s,"status":%s,"assignee":%s,"project":%s,"milestone":%s,"blocked_by":[`, t.id, quote(t.title), quote(t.description), quote(status_name(t.status)), quote(t.assignee), quote(t.project), quote(t.milestone))
+	fmt.sbprintf(&b, `{{"id":%d,"title":%s,"description":%s,"status":%s,"priority":%d,"assignee":%s,"project":%s,"milestone":%s,"blocked_by":[`, t.id, quote(t.title), quote(t.description), quote(status_name(t.status)), t.priority, quote(t.assignee), quote(t.project), quote(t.milestone))
 	for id, i in t.blocked_by {
 		fmt.sbprintf(&b, "%s%d", i > 0 ? "," : "", id)
 	}

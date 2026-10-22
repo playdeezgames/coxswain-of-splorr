@@ -10,7 +10,7 @@ STORE_FILE :: "tasks.json"
 // The on-disk format version. Bump it when the format changes in a way an older server would misread,
 // and migrate older files in store_load. A file without "version" is version 0, the format before
 // versions existed; it is read as it is and gets the current version on its next save.
-STORE_VERSION :: 1
+STORE_VERSION :: 2 // 2: tasks have a priority (absent = 0, so version 0 and 1 files read as they are)
 LOCK_WAIT :: 15 * time.Second // how long a tool waits for the lock before refusing
 
 Status :: enum {
@@ -29,6 +29,7 @@ Task :: struct {
 	title:       string,
 	description: string,
 	status:      Status,
+	priority:    int, // higher is more important; 0 unless set
 	assignee:    string,
 	blocked_by:  []int,
 	notes:       []Note,

@@ -438,3 +438,41 @@ test_store_version :: proc(t: ^testing.T) {
 	testing.expect(t, bad && strings.contains(text, "version 999") && strings.contains(text, fmt.tprintf("up to %d", STORE_VERSION)), text)
 	testing.expect(t, read(path) == newer, "a newer file is left alone")
 }
+
+@(test)
+test_priority :: proc(t: ^testing.T) {
+	s := temp_server("priority", "alice")
+	defer {os.remove_all(s.dir); server_destroy(&s)}
+
+	text, bad := call(&s, "task_create", `{"title":"a"}`)
+	testing.expect(t, !bad && strings.contains(text, `"priority":0`), text)
+	call(&s, "task_create", `{"title":"b","priority":5}`)
+	call(&s, "task_create", `{"title":"c","priority":5}`)
+	call(&s, "task_create", `{"title":"d","priority":9,"blocked_by":[1]}`)
+	_, bad = call(&s, "task_create", `{"title":"x","priority":"high"}`)
+	testing.expect(t, bad, "priority is an integer")
+
+	// Highest first, then lowest id; the list defaults to id order.
+	text, _ = call(&s, "task_list", `{"sort":"priority"}`)
+	ia, ib, ic, id := strings.index(text, `"title":"a"`), strings.index(text, `"title":"b"`), strings.index(text, `"title":"c"`), strings.index(text, `"title":"d"`)
+	testing.expect(t, id < ib && ib < ic && ic < ia, text)
+	text, _ = call(&s, "task_list", `{}`)
+	ia, ib, ic, id = strings.index(text, `"title":"a"`), strings.index(text, `"title":"b"`), strings.index(text, `"title":"c"`), strings.index(text, `"title":"d"`)
+	testing.expect(t, ia < ib && ib < ic && ic < id, text)
+	_, bad = call(&s, "task_list", `{"sort":"name"}`)
+	testing.expect(t, bad)
+
+	// task_next skips d (blocked, though it has the top priority), takes b over a and c.
+	text, _ = call(&s, "task_next", `{}`)
+	testing.expect(t, strings.contains(text, `"title":"b"`), text)
+	call(&s, "task_next", `{"claim":true}`)
+	text, _ = call(&s, "task_next", `{}`)
+	testing.expect(t, strings.contains(text, `"title":"c"`), text)
+
+	text, bad = call(&s, "task_update", `{"id":1,"priority":7}`)
+	testing.expect(t, !bad && strings.contains(text, `"priority":7`) && strings.contains(text, `"title":"a"`), text)
+	text, _ = call(&s, "task_next", `{}`)
+	testing.expect(t, strings.contains(text, `"title":"a"`), text)
+	_, bad = call(&s, "task_update", `{"id":1,"priority":1.5}`)
+	testing.expect(t, bad, "priority must be a whole number")
+}

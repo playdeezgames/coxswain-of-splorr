@@ -8,26 +8,26 @@ task_tools :: proc() -> []Tool {
 	@(static) table := [?]Tool {
 		{
 			name = "task_create",
-			description = "Create a task (status open), optionally in a project (which must exist) and a milestone of that project. blocked_by lists ids of tasks that must be done before it can be claimed. Returns the new task.",
-			schema = `{"type":"object","properties":{"title":{"type":"string"},"description":{"type":"string"},"blocked_by":{"type":"array","items":{"type":"integer"}},"project":{"type":"string"},"milestone":{"type":"string"}},"required":["title"]}`,
+			description = "Create a task (status open) with an optional integer priority (default 0; higher is more important), optionally in a project (which must exist) and a milestone of that project. blocked_by lists ids of tasks that must be done before it can be claimed. Returns the new task.",
+			schema = `{"type":"object","properties":{"title":{"type":"string"},"description":{"type":"string"},"blocked_by":{"type":"array","items":{"type":"integer"}},"priority":{"type":"integer"},"project":{"type":"string"},"milestone":{"type":"string"}},"required":["title"]}`,
 			run = tool_task_create,
 		},
 		{
 			name = "task_list",
-			description = "List tasks, optionally only those with a status (open, claimed, done), an assignee, a project or a milestone (milestone needs project). Each task is shown in full; blocked is true while a task it waits on is not done.",
-			schema = `{"type":"object","properties":{"status":{"type":"string","enum":["open","claimed","done"]},"assignee":{"type":"string"},"project":{"type":"string"},"milestone":{"type":"string"}}}`,
+			description = "List tasks, optionally only those with a status (open, claimed, done), an assignee, a project or a milestone (milestone needs project). Each task is shown in full; blocked is true while a task it waits on is not done. Ordered by id, or with sort \"priority\" by priority (highest first, then id).",
+			schema = `{"type":"object","properties":{"status":{"type":"string","enum":["open","claimed","done"]},"assignee":{"type":"string"},"project":{"type":"string"},"milestone":{"type":"string"},"sort":{"type":"string","enum":["id","priority"]}}}`,
 			run = tool_task_list,
 		},
 		{
 			name = "task_next",
-			description = "Show the next claimable task: the open task with the lowest id that no unfinished task blocks, optionally within a project or milestone (milestone needs project). With claim true it is also claimed for the agent (defaults to the server's --agent name), atomically. Says so, without failing, when nothing is claimable.",
+			description = "Show the next claimable task: the open task that no unfinished task blocks with the highest priority (lowest id among equals), optionally within a project or milestone (milestone needs project). With claim true it is also claimed for the agent (defaults to the server's --agent name), atomically. Says so, without failing, when nothing is claimable.",
 			schema = `{"type":"object","properties":{"project":{"type":"string"},"milestone":{"type":"string"},"claim":{"type":"boolean"},"agent":{"type":"string"}}}`,
 			run = tool_task_next,
 		},
 		{
 			name = "task_update",
-			description = "Change a task's title and/or description (give at least one; the title cannot be empty, the description can). Anyone may edit any task, in any status. Status, assignee, project and milestone have their own tools. agent (else the server's --agent) is refreshed as a heartbeat if registered. agent (else the server's --agent) is refreshed as a heartbeat if registered.",
-			schema = `{"type":"object","properties":{"id":{"type":"integer"},"title":{"type":"string"},"description":{"type":"string"},"agent":{"type":"string"}},"required":["id"]}`,
+			description = "Change a task's title, description and/or priority (give at least one; the title cannot be empty, the description can; higher priority is more important). Anyone may edit any task, in any status. Status, assignee, project and milestone have their own tools. agent (else the server's --agent) is refreshed as a heartbeat if registered. agent (else the server's --agent) is refreshed as a heartbeat if registered.",
+			schema = `{"type":"object","properties":{"id":{"type":"integer"},"title":{"type":"string"},"description":{"type":"string"},"priority":{"type":"integer"},"agent":{"type":"string"}},"required":["id"]}`,
 			run = tool_task_update,
 		},
 		{
@@ -68,6 +68,18 @@ task_tools :: proc() -> []Tool {
 		},
 	}
 	return table[:]
+}
+
+// The priority argument if given (any integer; higher is more important), else 0.
+optional_priority :: proc(args: json.Object) -> (p: int, res: Tool_Result, ok: bool) {
+	if _, has := args["priority"]; !has {
+		return 0, {}, true
+	}
+	v, got := arg_int(args, "priority")
+	if !got {
+		return 0, fail("priority is an integer (higher is more important)"), false
+	}
+	return v, {}, true
 }
 
 // Finds the task named by args.id, or the refusal.
@@ -122,8 +134,13 @@ tool_task_create :: proc(s: ^Server, args: json.Object) -> Tool_Result {
 			if r, ok := check_placement(st^, project, milestone); !ok {
 				return r, false
 			}
+			priority, r2, ok2 := optional_priority(args)
+			if !ok2 {
+				return r2, false
+			}
 			t := Task {
 				id          = st.next_id,
+				priority    = priority,
 				title       = title,
 				description = desc,
 				blocked_by  = deps[:],
@@ -151,10 +168,23 @@ tool_task_list :: proc(s: ^Server, args: json.Object) -> Tool_Result {
 			if has_ms && !has_project {
 				return fail("milestone needs project (milestone names are per project)"), false
 			}
+			sort, has_sort := arg_string(args, "sort")
+			if has_sort && sort != "id" && sort != "priority" {
+				return fail("sort is id or priority"), false
+			}
+			ordered := make([dynamic]Task, context.temp_allocator)
+			append(&ordered, ..st.tasks)
+			if sort == "priority" {
+				for i in 1 ..< len(ordered) { // insertion sort: stable, so ties stay in id order
+					for j := i; j > 0 && ordered[j].priority > ordered[j - 1].priority; j -= 1 {
+						ordered[j], ordered[j - 1] = ordered[j - 1], ordered[j]
+					}
+				}
+			}
 			b := strings.builder_make(context.temp_allocator)
 			strings.write_string(&b, "[")
 			n := 0
-			for t in st.tasks {
+			for t in ordered {
 				if has_status && status_name(t.status) != want_status {
 					continue
 				}
@@ -190,7 +220,8 @@ tool_task_next :: proc(s: ^Server, args: json.Object) -> Tool_Result {
 			if has_ms && !has_project {
 				return fail("milestone needs project (milestone names are per project)"), false
 			}
-			for &t in st.tasks {
+			best := -1
+			for t, i in st.tasks {
 				if t.status != .Open {
 					continue
 				}
@@ -203,14 +234,20 @@ tool_task_next :: proc(s: ^Server, args: json.Object) -> Tool_Result {
 				if _, blocked := task_blocked_by_open(st^, t); blocked {
 					continue
 				}
+				if best < 0 || t.priority > st.tasks[best].priority {
+					best = i
+				}
+			}
+			if best >= 0 {
+				t := &st.tasks[best]
 				if arg_bool(args, "claim") {
 					agent, _ := arg_string(args, "agent")
 					t.status = .Claimed
 					t.assignee = agent
 					refresh_agent(s, st, args)
-					return ok_result(task_json(st^, t)), true
+					return ok_result(task_json(st^, t^)), true
 				}
-				return ok_result(task_json(st^, t)), false
+				return ok_result(task_json(st^, t^)), false
 			}
 			return ok_result("no claimable task"), false
 		}, args)
@@ -391,8 +428,13 @@ tool_task_update :: proc(s: ^Server, args: json.Object) -> Tool_Result {
 			}
 			title, has_title := arg_string(args, "title")
 			desc, has_desc := arg_string(args, "description")
-			if !has_title && !has_desc {
-				return fail("give title and/or description"), false
+			priority, r2, ok2 := optional_priority(args)
+			if !ok2 {
+				return r2, false
+			}
+			_, has_priority := args["priority"]
+			if !has_title && !has_desc && !has_priority {
+				return fail("give title, description and/or priority"), false
 			}
 			if has_title && strings.trim_space(title) == "" {
 				return fail("title is empty"), false
@@ -403,6 +445,9 @@ tool_task_update :: proc(s: ^Server, args: json.Object) -> Tool_Result {
 			}
 			if has_desc {
 				t.description = desc
+			}
+			if has_priority {
+				t.priority = priority
 			}
 			refresh_agent(s, st, args)
 			return ok_result(task_json(st^, t^)), true
