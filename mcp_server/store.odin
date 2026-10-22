@@ -10,7 +10,7 @@ STORE_FILE :: "tasks.json"
 // The on-disk format version. Bump it when the format changes in a way an older server would misread,
 // and migrate older files in store_load. A file without "version" is version 0, the format before
 // versions existed; it is read as it is and gets the current version on its next save.
-STORE_VERSION :: 4 // 2: tasks have a priority; 3: tasks have a history; 4: status Cancelled (the rest absent = empty/0, so older files read as they are)
+STORE_VERSION :: 5 // 2: tasks have a priority; 3: tasks have a history; 4: status Cancelled; 5: milestones have done (the rest absent = empty/0, so older files read as they are)
 LOCK_WAIT :: 15 * time.Second // how long a tool waits for the lock before refusing
 
 Status :: enum {
@@ -58,6 +58,7 @@ Milestone :: struct {
 	project:     string,
 	name:        string,
 	description: string,
+	done:        bool, // set by milestone_set_done; says the milestone is finished, whatever its tasks' states
 }
 
 // A registered session or agent. last_seen is seconds since 1970, set by registering or a heartbeat.

@@ -134,6 +134,12 @@ List projects, each with its milestones and counts of its tasks by status (miles
 
 Input schema: `{"type":"object","properties":{}}`
 
+## `project_rename`
+
+Rename a project. Its milestones and tasks follow the new name (each task gets a history entry). The new name must be unused and at most 64 characters.
+
+Input schema: `{"type":"object","properties":{"name":{"type":"string"},"new_name":{"type":"string"},"agent":{"type":"string"}},"required":["name","new_name"]}`
+
 ## `project_delete`
 
 Delete a project and its milestones. Refused while any task is still in the project: move or finish those first.
@@ -145,6 +151,18 @@ Input schema: `{"type":"object","properties":{"name":{"type":"string"}},"require
 Add a milestone to a project (names are unique within the project, at most 64 characters). Tasks join it with task_create or task_move.
 
 Input schema: `{"type":"object","properties":{"project":{"type":"string"},"name":{"type":"string"},"description":{"type":"string"}},"required":["project","name"]}`
+
+## `milestone_rename`
+
+Rename a milestone within its project. Its tasks follow the new name (each task gets a history entry). The new name must be unused in that project and at most 64 characters.
+
+Input schema: `{"type":"object","properties":{"project":{"type":"string"},"name":{"type":"string"},"new_name":{"type":"string"},"agent":{"type":"string"}},"required":["project","name","new_name"]}`
+
+## `milestone_set_done`
+
+Mark a milestone done (done true) or not done (done false); project_list reports it. This is a flag you set: it does not change its tasks, and creating or moving tasks into a done milestone is still allowed.
+
+Input schema: `{"type":"object","properties":{"project":{"type":"string"},"name":{"type":"string"},"done":{"type":"boolean"}},"required":["project","name","done"]}`
 
 ## `milestone_delete`
 
