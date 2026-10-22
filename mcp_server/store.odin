@@ -7,8 +7,6 @@ import "core:path/filepath"
 import "core:time"
 
 STORE_FILE :: "tasks.json"
-LOCK_DIR :: "tasks.lock"
-LOCK_STALE :: 30 * time.Second // a lock older than this belongs to a dead process
 LOCK_WAIT :: 15 * time.Second // how long a tool waits for the lock before refusing
 
 Status :: enum {
@@ -66,34 +64,6 @@ Store :: struct {
 store_path :: proc(s: ^Server, name: string) -> string {
 	dir := s.dir == "" ? "." : s.dir
 	return filepath.join({dir, name}, context.temp_allocator) or_else name
-}
-
-// Takes the store's lock (a directory: creating one is atomic) and returns the unlock proc's work as
-// ok. Callers `defer store_unlock(s)` after a successful lock.
-store_lock :: proc(s: ^Server) -> bool {
-	if s.dir != "" {
-		os.make_directory_all(s.dir)
-	}
-	lock := store_path(s, LOCK_DIR)
-	start := time.now()
-	seed := u32(os.get_pid()) * 2654435761
-	for time.since(start) < LOCK_WAIT {
-		if err := os.make_directory(lock); err == nil {
-			return true
-		}
-		if info, err := os.stat(lock, context.temp_allocator); err == nil && time.since(info.modification_time) > LOCK_STALE {
-			os.remove(lock)
-			continue
-		}
-		// Jittered backoff, so waiters do not retry in step and starve one another.
-		seed = seed * 1664525 + 1013904223
-		time.sleep(time.Duration(2 + (seed >> 16) % 28) * time.Millisecond)
-	}
-	return false
-}
-
-store_unlock :: proc(s: ^Server) {
-	os.remove(store_path(s, LOCK_DIR))
 }
 
 // Reads the store; a missing file is an empty store.

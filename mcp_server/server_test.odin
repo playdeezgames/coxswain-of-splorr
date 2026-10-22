@@ -204,3 +204,18 @@ test_task_update :: proc(t: ^testing.T) {
 	text, bad = call(&s, "task_update", `{"id":1,"description":""}`)
 	testing.expect(t, !bad && strings.contains(text, `"title":"new"`) && strings.contains(text, `"description":""`), text)
 }
+
+// A lock file left by a crashed process must not block anyone: the kernel drops the flock with the
+// process, so there is nothing stale to clean up.
+@(test)
+test_leftover_lock_files_do_not_block :: proc(t: ^testing.T) {
+	s := temp_server("leftover", "alice")
+	defer {os.remove_all(s.dir); server_destroy(&s)}
+	os.make_directory_all(s.dir)
+	_ = os.write_entire_file(fmt.tprintf("%s/tasks.flock", s.dir), []u8{})
+	os.make_directory(fmt.tprintf("%s/tasks.lock", s.dir)) // the old scheme's leftover
+	text, bad := call(&s, "task_create", `{"title":"a"}`)
+	testing.expect(t, !bad, text)
+	text, bad = call(&s, "task_create", `{"title":"b"}`)
+	testing.expect(t, !bad, "the lock is released after each call")
+}

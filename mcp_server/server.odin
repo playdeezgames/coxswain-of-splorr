@@ -25,6 +25,7 @@ ERR_INVALID_PARAMS :: -32602
 Server :: struct {
 	dir:   string, // the folder holding the task store; owned
 	agent: string, // this session's default agent name ("" = tools must be told); owned
+	lock:  int, // the store lock this server holds while a tool runs (see lock_*.odin)
 }
 
 server_init :: proc(s: ^Server, dir, agent: string) {
