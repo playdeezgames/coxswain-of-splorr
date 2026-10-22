@@ -66,20 +66,24 @@ store_path :: proc(s: ^Server, name: string) -> string {
 	return filepath.join({dir, name}, context.temp_allocator) or_else name
 }
 
-// Reads the store; a missing file is an empty store.
-store_load :: proc(s: ^Server) -> (st: Store, ok: bool) {
+// Reads the store; a missing file is an empty store. Otherwise problem says why the file could not be
+// used ("" = fine). A bad file is never replaced: callers refuse and leave it for a person to look at.
+store_load :: proc(s: ^Server) -> (st: Store, problem: string) {
 	path := store_path(s, STORE_FILE)
+	if !os.exists(path) {
+		return Store{next_id = 1}, ""
+	}
 	data, err := os.read_entire_file(path, context.temp_allocator)
 	if err != nil {
-		return Store{next_id = 1}, !os.exists(path)
+		return {}, fmt.tprintf("%s exists but could not be read (%v)", path, err)
 	}
 	if uerr := json.unmarshal(data, &st, .JSON, context.temp_allocator); uerr != nil {
-		return {}, false
+		return {}, fmt.tprintf("%s is not a valid task store (%v); it was left untouched", path, uerr)
 	}
 	if st.next_id < 1 {
 		st.next_id = 1
 	}
-	return st, true
+	return st, ""
 }
 
 // Writes the store through a temp file and a rename, so a reader never sees half of it.

@@ -219,3 +219,58 @@ test_leftover_lock_files_do_not_block :: proc(t: ^testing.T) {
 	text, bad = call(&s, "task_create", `{"title":"b"}`)
 	testing.expect(t, !bad, "the lock is released after each call")
 }
+
+// Every way tasks.json can be unusable must give a refusal naming the file, from reads and writes
+// alike, and must leave the file exactly as it was.
+@(test)
+test_corrupt_store_is_refused_and_kept :: proc(t: ^testing.T) {
+	s := temp_server("corrupt", "alice")
+	defer {os.remove_all(s.dir); server_destroy(&s)}
+	os.make_directory_all(s.dir)
+	path := fmt.tprintf("%s/tasks.json", s.dir)
+
+	bad_files := [?]string {
+		"",                                         // empty
+		"   \n",                                    // blank
+		`{"next_id": 3, "tasks": [{"id": 1, "ti`,   // truncated
+		"not json at all",
+		`[1, 2, 3]`,                                // valid JSON, wrong shape
+		`{"next_id": "three", "tasks": []}`,        // wrong field type
+		`{"next_id": 2, "tasks": [{"id": "x"}]}`,   // wrong type inside a task
+		"\x00\x01\x02\xff",                         // binary
+	}
+	for content in bad_files {
+		testing.expectf(t, os.write_entire_file(path, transmute([]u8)content) == nil, "could not write the fixture")
+		for tool_call in ([?][2]string{{"task_list", `{}`}, {"task_create", `{"title":"x"}`}, {"project_create", `{"name":"p"}`}, {"agent_register", `{}`}}) {
+			text, bad := call(&s, tool_call[0], tool_call[1])
+			testing.expectf(t, bad && strings.contains(text, path) && strings.contains(text, "untouched"), "%q: %s -> %s", content, tool_call[0], text)
+		}
+		after, err := os.read_entire_file(path, context.temp_allocator)
+		testing.expectf(t, err == nil && string(after) == content, "%q was modified", content)
+	}
+
+	// No temp files are left behind by the refusals.
+	infos, _ := os.read_all_directory_by_path(s.dir, context.temp_allocator)
+	for info in infos {
+		testing.expectf(t, !strings.has_suffix(info.name, ".tmp"), "left a temp file %s", info.name)
+	}
+
+	// Once a person fixes the file, the server works with it again.
+	testing.expect(t, os.write_entire_file(path, transmute([]u8)string(`{"next_id":5,"tasks":[]}`)) == nil)
+	text, bad := call(&s, "task_create", `{"title":"after repair"}`)
+	testing.expect(t, !bad && strings.contains(text, `"id":5`), text)
+}
+
+@(test)
+test_unreadable_store_is_refused :: proc(t: ^testing.T) {
+	s := temp_server("unreadable", "alice")
+	defer {os.remove_all(s.dir); server_destroy(&s)}
+	call(&s, "task_create", `{"title":"a"}`)
+	path := fmt.tprintf("%s/tasks.json", s.dir)
+	testing.expect(t, os.chmod(path, {}) == nil)
+	text, bad := call(&s, "task_list", `{}`)
+	os.chmod(path, {.Read_User, .Write_User})
+	testing.expect(t, bad && strings.contains(text, "could not be read"), text)
+	text, bad = call(&s, "task_list", `{}`)
+	testing.expect(t, !bad, text)
+}

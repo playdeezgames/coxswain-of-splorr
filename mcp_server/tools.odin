@@ -26,9 +26,9 @@ with_store :: proc(s: ^Server, body: proc(s: ^Server, st: ^Store, args: json.Obj
 		return fail("could not lock the task store (another session holds it); try again")
 	}
 	defer store_unlock(s)
-	st, ok := store_load(s)
-	if !ok {
-		return fail("the task store file exists but could not be read")
+	st, problem := store_load(s)
+	if problem != "" {
+		return fail(problem)
 	}
 	res, save := body(s, &st, args)
 	if save && !res.is_error && !store_save(s, st) {
