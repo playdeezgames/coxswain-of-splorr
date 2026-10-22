@@ -8,7 +8,8 @@ import "core:time"
 
 STORE_FILE :: "tasks.json"
 LOCK_DIR :: "tasks.lock"
-LOCK_STALE :: 10 * time.Second // a lock older than this belongs to a dead process
+LOCK_STALE :: 30 * time.Second // a lock older than this belongs to a dead process
+LOCK_WAIT :: 15 * time.Second // how long a tool waits for the lock before refusing
 
 Status :: enum {
 	Open,
@@ -57,7 +58,9 @@ store_lock :: proc(s: ^Server) -> bool {
 		os.make_directory_all(s.dir)
 	}
 	lock := store_path(s, LOCK_DIR)
-	for _ in 0 ..< 200 {
+	start := time.now()
+	seed := u32(os.get_pid()) * 2654435761
+	for time.since(start) < LOCK_WAIT {
 		if err := os.make_directory(lock); err == nil {
 			return true
 		}
@@ -65,7 +68,9 @@ store_lock :: proc(s: ^Server) -> bool {
 			os.remove(lock)
 			continue
 		}
-		time.sleep(25 * time.Millisecond)
+		// Jittered backoff, so waiters do not retry in step and starve one another.
+		seed = seed * 1664525 + 1013904223
+		time.sleep(time.Duration(2 + (seed >> 16) % 28) * time.Millisecond)
 	}
 	return false
 }
