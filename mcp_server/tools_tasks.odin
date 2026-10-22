@@ -9,7 +9,7 @@ task_tools :: proc() -> []Tool {
 		{
 			name = "task_create",
 			description = "Create a task (status open) with an optional integer priority (default 0; higher is more important), optionally in a project (which must exist) and a milestone of that project. blocked_by lists ids of tasks that must be done before it can be claimed. Returns the new task.",
-			schema = `{"type":"object","properties":{"title":{"type":"string"},"description":{"type":"string"},"blocked_by":{"type":"array","items":{"type":"integer"}},"priority":{"type":"integer"},"project":{"type":"string"},"milestone":{"type":"string"}},"required":["title"]}`,
+			schema = `{"type":"object","properties":{"title":{"type":"string"},"description":{"type":"string"},"blocked_by":{"type":"array","items":{"type":"integer"}},"priority":{"type":"integer"},"project":{"type":"string"},"milestone":{"type":"string"},"agent":{"type":"string"}},"required":["title"]}`,
 			run = tool_task_create,
 		},
 		{
@@ -25,6 +25,12 @@ task_tools :: proc() -> []Tool {
 			run = tool_task_next,
 		},
 		{
+			name = "task_history",
+			description = "Show a task's history, oldest first: when (unix seconds), who, what happened (created, claimed, released, completed, noted, updated, moved) and a detail. Tasks from before the log existed start with whatever happened after.",
+			schema = `{"type":"object","properties":{"id":{"type":"integer"}},"required":["id"]}`,
+			run = tool_task_history,
+		},
+		{
 			name = "task_update",
 			description = "Change a task's title, description and/or priority (give at least one; the title cannot be empty, the description can; higher priority is more important). Anyone may edit any task, in any status. Status, assignee, project and milestone have their own tools. agent (else the server's --agent) is refreshed as a heartbeat if registered. agent (else the server's --agent) is refreshed as a heartbeat if registered.",
 			schema = `{"type":"object","properties":{"id":{"type":"integer"},"title":{"type":"string"},"description":{"type":"string"},"priority":{"type":"integer"},"agent":{"type":"string"}},"required":["id"]}`,
@@ -33,7 +39,7 @@ task_tools :: proc() -> []Tool {
 		{
 			name = "task_move",
 			description = "Put a task in a project and optionally one of its milestones, or take it out. Giving project replaces the placement (the milestone is cleared unless given too); giving only milestone keeps the task's project. An empty string clears: project \"\" removes it from its project and milestone, milestone \"\" removes it from its milestone.",
-			schema = `{"type":"object","properties":{"id":{"type":"integer"},"project":{"type":"string"},"milestone":{"type":"string"}},"required":["id"]}`,
+			schema = `{"type":"object","properties":{"id":{"type":"integer"},"project":{"type":"string"},"milestone":{"type":"string"},"agent":{"type":"string"}},"required":["id"]}`,
 			run = tool_task_move,
 		},
 		{
@@ -95,6 +101,23 @@ find_task :: proc(st: ^Store, args: json.Object) -> (idx: int, res: Tool_Result,
 	return i, {}, true
 }
 
+// Who is acting: the agent argument, else the server's --agent, else "" (create, move and update
+// do not insist on a name).
+actor :: proc(s: ^Server, args: json.Object) -> string {
+	if a, has := arg_string(args, "agent"); has && a != "" {
+		return a
+	}
+	return s.agent
+}
+
+// Appends an event to the task's history.
+record :: proc(t: ^Task, who, action, detail: string) {
+	events := make([dynamic]Event, context.temp_allocator)
+	append(&events, ..t.history)
+	append(&events, Event{now_unix(), who, action, detail})
+	t.history = events[:]
+}
+
 append_note :: proc(t: ^Task, author, text: string) {
 	notes := make([dynamic]Note, context.temp_allocator)
 	append(&notes, ..t.notes)
@@ -148,7 +171,8 @@ tool_task_create :: proc(s: ^Server, args: json.Object) -> Tool_Result {
 				milestone   = milestone,
 			}
 			st.next_id += 1
-			tasks := make([dynamic]Task, context.temp_allocator)
+			record(&t, actor(s, args), "created", t.title)
+tasks := make([dynamic]Task, context.temp_allocator)
 			append(&tasks, ..st.tasks)
 			append(&tasks, t)
 			st.tasks = tasks[:]
@@ -244,12 +268,29 @@ tool_task_next :: proc(s: ^Server, args: json.Object) -> Tool_Result {
 					agent, _ := arg_string(args, "agent")
 					t.status = .Claimed
 					t.assignee = agent
+					record(t, agent, "claimed", "via task_next")
 					refresh_agent(s, st, args)
 					return ok_result(task_json(st^, t^)), true
 				}
 				return ok_result(task_json(st^, t^)), false
 			}
 			return ok_result("no claimable task"), false
+		}, args)
+}
+
+tool_task_history :: proc(s: ^Server, args: json.Object) -> Tool_Result {
+	return with_store(s, proc(s: ^Server, st: ^Store, args: json.Object) -> (Tool_Result, bool) {
+			i, r, ok := find_task(st, args)
+			if !ok {
+				return r, false
+			}
+			b := strings.builder_make(context.temp_allocator)
+			strings.write_string(&b, "[")
+			for e, j in st.tasks[i].history {
+				fmt.sbprintf(&b, `%s{{"at":%d,"who":%s,"action":%s,"detail":%s}}`, j > 0 ? "," : "", e.at, quote(e.who), quote(e.action), quote(e.detail))
+			}
+			strings.write_string(&b, "]")
+			return ok_result(strings.to_string(b)), false
 		}, args)
 }
 
@@ -289,6 +330,7 @@ tool_task_claim :: proc(s: ^Server, args: json.Object) -> Tool_Result {
 			}
 			t.status = .Claimed
 			t.assignee = agent
+			record(t, agent, "claimed", "")
 			refresh_agent(s, st, args)
 			return ok_result(task_json(st^, t^)), true
 		}, args)
@@ -314,8 +356,13 @@ tool_task_release :: proc(s: ^Server, args: json.Object) -> Tool_Result {
 			if t.assignee != agent && !arg_bool(args, "force") {
 				return fail(fmt.tprintf("task %d is claimed by %s, not %s (force true overrides)", t.id, t.assignee, agent)), false
 			}
+			detail := ""
+			if t.assignee != agent {
+				detail = fmt.tprintf("forced; was claimed by %s", t.assignee)
+			}
 			t.status = .Open
 			t.assignee = ""
+			record(t, agent, "released", detail)
 			refresh_agent(s, st, args)
 			return ok_result(task_json(st^, t^)), true
 		}, args)
@@ -344,7 +391,12 @@ tool_task_complete :: proc(s: ^Server, args: json.Object) -> Tool_Result {
 			if note, has := arg_string(args, "note"); has && note != "" {
 				append_note(t, agent, note)
 			}
+			detail := ""
+			if t.assignee != agent {
+				detail = fmt.tprintf("forced; was claimed by %s", t.assignee)
+			}
 			t.status = .Done
+			record(t, agent, "completed", detail)
 			refresh_agent(s, st, args)
 			return ok_result(task_json(st^, t^)), true
 		}, args)
@@ -368,7 +420,8 @@ tool_task_note :: proc(s: ^Server, args: json.Object) -> Tool_Result {
 			}
 			agent, _ := arg_string(args, "agent")
 			append_note(&st.tasks[i], agent, text)
-			refresh_agent(s, st, args)
+			record(&st.tasks[i], agent, "noted", "")
+refresh_agent(s, st, args)
 			return ok_result(task_json(st^, st.tasks[i])), true
 		}, args)
 }
@@ -414,9 +467,10 @@ tool_task_move :: proc(s: ^Server, args: json.Object) -> Tool_Result {
 			if r, ok := check_placement(st^, project, milestone); !ok {
 				return r, false
 			}
+			record(t, actor(s, args), "moved", fmt.tprintf("%s/%s -> %s/%s", t.project, t.milestone, project, milestone))
 			t.project = project
 			t.milestone = milestone
-			return ok_result(task_json(st^, t^)), true
+return ok_result(task_json(st^, t^)), true
 		}, args)
 }
 
@@ -440,6 +494,17 @@ tool_task_update :: proc(s: ^Server, args: json.Object) -> Tool_Result {
 				return fail("title is empty"), false
 			}
 			t := &st.tasks[i]
+			changed := make([dynamic]string, context.temp_allocator)
+			if has_title {
+				append(&changed, "title")
+			}
+			if has_desc {
+				append(&changed, "description")
+			}
+			if has_priority {
+				append(&changed, "priority")
+			}
+			record(t, actor(s, args), "updated", strings.join(changed[:], ", ", context.temp_allocator))
 			if has_title {
 				t.title = title
 			}

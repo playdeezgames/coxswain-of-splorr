@@ -476,3 +476,60 @@ test_priority :: proc(t: ^testing.T) {
 	_, bad = call(&s, "task_update", `{"id":1,"priority":1.5}`)
 	testing.expect(t, bad, "priority must be a whole number")
 }
+
+@(test)
+test_history :: proc(t: ^testing.T) {
+	s := temp_server("history", "alice")
+	defer {os.remove_all(s.dir); server_destroy(&s)}
+
+	call(&s, "project_create", `{"name":"p"}`)
+	call(&s, "task_create", `{"title":"a"}`)
+	call(&s, "task_update", `{"id":1,"title":"a2","priority":3}`)
+	call(&s, "task_move", `{"id":1,"project":"p"}`)
+	call(&s, "task_claim", `{"id":1}`)
+	call(&s, "task_note", `{"id":1,"text":"hi"}`)
+	call(&s, "task_release", `{"id":1,"agent":"bob","force":true}`)
+	call(&s, "task_next", `{"claim":true,"agent":"bob"}`)
+	call(&s, "task_complete", `{"id":1,"agent":"bob"}`)
+
+	text, bad := call(&s, "task_history", `{"id":1}`)
+	testing.expect(t, !bad, text)
+	// Oldest first, in the order things happened.
+	last := -1
+	for action in ([?]string{"created", "updated", "moved", "claimed", "noted", "released", "claimed", "completed"}) {
+		at := strings.index(text[last + 1:], fmt.tprintf(`"action":"%s"`, action))
+		testing.expectf(t, at >= 0, "%s missing or out of order in %s", action, text)
+		last += at + 1
+	}
+	testing.expect(t, strings.contains(text, `"detail":"title, priority"`) && strings.contains(text, `"detail":"/ -> p/"`), text)
+	testing.expect(t, strings.contains(text, "forced; was claimed by alice") && strings.contains(text, "via task_next"), text)
+	testing.expect(t, strings.contains(text, `"who":"alice"`) && strings.contains(text, `"who":"bob"`), text)
+
+	// A refused call leaves no trace; unknown ids are refused.
+	call(&s, "task_claim", `{"id":1}`)
+	text2, _ := call(&s, "task_history", `{"id":1}`)
+	testing.expect(t, text2 == text, "a refused claim is not recorded")
+	_, bad = call(&s, "task_history", `{"id":9}`)
+	testing.expect(t, bad)
+
+	// task_get stays free of the log.
+	text, _ = call(&s, "task_get", `{"id":1}`)
+	testing.expect(t, !strings.contains(text, "action"), text)
+}
+
+@(test)
+test_release_stale_is_recorded :: proc(t: ^testing.T) {
+	s := temp_server("stalehist", "alice")
+	defer {os.remove_all(s.dir); server_destroy(&s)}
+	call(&s, "task_create", `{"title":"a"}`)
+	call(&s, "agent_register", `{"agent":"bob"}`)
+	call(&s, "task_claim", `{"id":1,"agent":"bob"}`)
+	testing.expect(t, store_lock(&s))
+	st, _ := store_load(&s)
+	st.agents[0].last_seen -= 1000
+	store_save(&s, st)
+	store_unlock(&s)
+	call(&s, "task_release_stale", `{"release":true}`)
+	text, _ := call(&s, "task_history", `{"id":1}`)
+	testing.expect(t, strings.contains(text, `"action":"released"`) && strings.contains(text, "stale: bob"), text)
+}

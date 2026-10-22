@@ -198,9 +198,10 @@ tool_task_release_stale :: proc(s: ^Server, args: json.Object) -> Tool_Result {
 				n_stale += 1
 				if release {
 					append_note(&t, author, fmt.tprintf("released: %s was not seen for %d seconds (more than %d)", t.assignee, age, stale))
+					record(&t, author, "released", fmt.tprintf("stale: %s not seen for %d seconds", t.assignee, age))
 					t.status = .Open
 					t.assignee = ""
-				}
+}
 			}
 			if release {
 				refresh_agent(s, st, args)

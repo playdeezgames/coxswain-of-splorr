@@ -10,7 +10,7 @@ STORE_FILE :: "tasks.json"
 // The on-disk format version. Bump it when the format changes in a way an older server would misread,
 // and migrate older files in store_load. A file without "version" is version 0, the format before
 // versions existed; it is read as it is and gets the current version on its next save.
-STORE_VERSION :: 2 // 2: tasks have a priority (absent = 0, so version 0 and 1 files read as they are)
+STORE_VERSION :: 3 // 2: tasks have a priority; 3: tasks have a history (both absent = empty/0, so older files read as they are)
 LOCK_WAIT :: 15 * time.Second // how long a tool waits for the lock before refusing
 
 Status :: enum {
@@ -24,6 +24,14 @@ Note :: struct {
 	text:   string,
 }
 
+// One thing that happened to a task. at is seconds since 1970; who may be "" when nobody was named.
+Event :: struct {
+	at:     i64,
+	who:    string,
+	action: string, // created, claimed, released, completed, noted, updated, moved
+	detail: string,
+}
+
 Task :: struct {
 	id:          int,
 	title:       string,
@@ -33,6 +41,7 @@ Task :: struct {
 	assignee:    string,
 	blocked_by:  []int,
 	notes:       []Note,
+	history:     []Event,
 	project:     string, // "" = in no project
 	milestone:   string, // "" = in no milestone; only meaningful (and only allowed) with a project
 }
