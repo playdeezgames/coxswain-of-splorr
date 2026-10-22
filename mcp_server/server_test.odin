@@ -238,6 +238,8 @@ test_corrupt_store_is_refused_and_kept :: proc(t: ^testing.T) {
 		`{"next_id": "three", "tasks": []}`,        // wrong field type
 		`{"next_id": 2, "tasks": [{"id": "x"}]}`,   // wrong type inside a task
 		"\x00\x01\x02\xff",                         // binary
+		`{"version": 999, "next_id": 2, "tasks": []}`, // from a newer server
+		`{"version": -1, "next_id": 2, "tasks": []}`,
 	}
 	for content in bad_files {
 		testing.expectf(t, os.write_entire_file(path, transmute([]u8)content) == nil, "could not write the fixture")
@@ -397,4 +399,42 @@ test_release_stale :: proc(t: ^testing.T) {
 
 	text, _ = call(&s, "task_release_stale", `{"release":true}`)
 	testing.expect(t, strings.contains(text, `"stale":[]`), text)
+}
+
+@(test)
+test_store_version :: proc(t: ^testing.T) {
+	s := temp_server("version", "alice")
+	defer {os.remove_all(s.dir); server_destroy(&s)}
+	os.make_directory_all(s.dir)
+	path := fmt.tprintf("%s/tasks.json", s.dir)
+	read :: proc(path: string) -> string {
+		data, _ := os.read_entire_file(path, context.temp_allocator)
+		return string(data)
+	}
+	has_version :: proc(text: string) -> bool {
+		return strings.contains(text, fmt.tprintf(`"version": %d`, STORE_VERSION))
+	}
+
+	// A new store is written with the current version.
+	call(&s, "task_create", `{"title":"a"}`)
+	testing.expect(t, has_version(read(path)), read(path))
+
+	// A file from before versions existed is read as it is, and reading alone leaves it alone.
+	old := `{"next_id":3,"tasks":[{"id":2,"title":"old","status":"Open"}]}`
+	testing.expect(t, os.write_entire_file(path, transmute([]u8)old) == nil)
+	text, bad := call(&s, "task_list", `{}`)
+	testing.expect(t, !bad && strings.contains(text, `"title":"old"`), text)
+	testing.expect(t, read(path) == old, "a read must not rewrite the file")
+
+	// The next write stamps the current version and keeps the data.
+	text, bad = call(&s, "task_create", `{"title":"new"}`)
+	testing.expect(t, !bad && strings.contains(text, `"id":3`), text)
+	testing.expect(t, has_version(read(path)) && strings.contains(read(path), "old"), read(path))
+
+	// A newer file is refused with both versions named.
+	newer := `{"version":999,"next_id":2,"tasks":[]}`
+	testing.expect(t, os.write_entire_file(path, transmute([]u8)newer) == nil)
+	text, bad = call(&s, "task_create", `{"title":"x"}`)
+	testing.expect(t, bad && strings.contains(text, "version 999") && strings.contains(text, fmt.tprintf("up to %d", STORE_VERSION)), text)
+	testing.expect(t, read(path) == newer, "a newer file is left alone")
 }

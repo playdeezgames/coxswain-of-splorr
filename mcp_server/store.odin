@@ -7,6 +7,10 @@ import "core:path/filepath"
 import "core:time"
 
 STORE_FILE :: "tasks.json"
+// The on-disk format version. Bump it when the format changes in a way an older server would misread,
+// and migrate older files in store_load. A file without "version" is version 0, the format before
+// versions existed; it is read as it is and gets the current version on its next save.
+STORE_VERSION :: 1
 LOCK_WAIT :: 15 * time.Second // how long a tool waits for the lock before refusing
 
 Status :: enum {
@@ -54,6 +58,7 @@ Agent :: struct {
 
 // The whole store as it is on disk. Everything loaded is on the temp allocator.
 Store :: struct {
+	version: int,
 	next_id: int,
 	tasks:   []Task,
 	agents:  []Agent,
@@ -71,7 +76,7 @@ store_path :: proc(s: ^Server, name: string) -> string {
 store_load :: proc(s: ^Server) -> (st: Store, problem: string) {
 	path := store_path(s, STORE_FILE)
 	if !os.exists(path) {
-		return Store{next_id = 1}, ""
+		return Store{version = STORE_VERSION, next_id = 1}, ""
 	}
 	data, err := os.read_entire_file(path, context.temp_allocator)
 	if err != nil {
@@ -80,6 +85,10 @@ store_load :: proc(s: ^Server) -> (st: Store, problem: string) {
 	if uerr := json.unmarshal(data, &st, .JSON, context.temp_allocator); uerr != nil {
 		return {}, fmt.tprintf("%s is not a valid task store (%v); it was left untouched", path, uerr)
 	}
+	if st.version < 0 || st.version > STORE_VERSION {
+		return {}, fmt.tprintf("%s has store version %d, but this server only understands up to %d; update the server (the file was left untouched)", path, st.version, STORE_VERSION)
+	}
+	st.version = STORE_VERSION
 	if st.next_id < 1 {
 		st.next_id = 1
 	}
