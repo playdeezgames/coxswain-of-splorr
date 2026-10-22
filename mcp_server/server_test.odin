@@ -185,3 +185,22 @@ test_projects_and_milestones :: proc(t: ^testing.T) {
 	text, _ = call(&s, "project_list", `{}`)
 	testing.expect(t, !strings.contains(text, "m1"), "milestones go with their project")
 }
+
+@(test)
+test_task_update :: proc(t: ^testing.T) {
+	s := temp_server("update", "alice")
+	defer {os.remove_all(s.dir); server_destroy(&s)}
+	call(&s, "task_create", `{"title":"old","description":"old text"}`)
+
+	text, bad := call(&s, "task_update", `{"id":1}`)
+	testing.expect(t, bad, "needs something to change")
+	text, bad = call(&s, "task_update", `{"id":1,"title":"  "}`)
+	testing.expect(t, bad && strings.contains(text, "title is empty"), text)
+	text, bad = call(&s, "task_update", `{"id":9,"title":"x"}`)
+	testing.expect(t, bad && strings.contains(text, "no task 9"), text)
+
+	text, bad = call(&s, "task_update", `{"id":1,"title":"new"}`)
+	testing.expect(t, !bad && strings.contains(text, `"title":"new"`) && strings.contains(text, "old text"), text)
+	text, bad = call(&s, "task_update", `{"id":1,"description":""}`)
+	testing.expect(t, !bad && strings.contains(text, `"title":"new"`) && strings.contains(text, `"description":""`), text)
+}

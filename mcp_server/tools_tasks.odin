@@ -19,6 +19,12 @@ task_tools :: proc() -> []Tool {
 			run = tool_task_list,
 		},
 		{
+			name = "task_update",
+			description = "Change a task's title and/or description (give at least one; the title cannot be empty, the description can). Anyone may edit any task, in any status. Status, assignee, project and milestone have their own tools.",
+			schema = `{"type":"object","properties":{"id":{"type":"integer"},"title":{"type":"string"},"description":{"type":"string"}},"required":["id"]}`,
+			run = tool_task_update,
+		},
+		{
 			name = "task_move",
 			description = "Put a task in a project and optionally one of its milestones, or take it out. Giving project replaces the placement (the milestone is cleared unless given too); giving only milestone keeps the task's project. An empty string clears: project \"\" removes it from its project and milestone, milestone \"\" removes it from its milestone.",
 			schema = `{"type":"object","properties":{"id":{"type":"integer"},"project":{"type":"string"},"milestone":{"type":"string"}},"required":["id"]}`,
@@ -322,6 +328,31 @@ tool_task_move :: proc(s: ^Server, args: json.Object) -> Tool_Result {
 			}
 			t.project = project
 			t.milestone = milestone
+			return ok_result(task_json(st^, t^)), true
+		}, args)
+}
+
+tool_task_update :: proc(s: ^Server, args: json.Object) -> Tool_Result {
+	return with_store(s, proc(s: ^Server, st: ^Store, args: json.Object) -> (Tool_Result, bool) {
+			i, r, ok := find_task(st, args)
+			if !ok {
+				return r, false
+			}
+			title, has_title := arg_string(args, "title")
+			desc, has_desc := arg_string(args, "description")
+			if !has_title && !has_desc {
+				return fail("give title and/or description"), false
+			}
+			if has_title && strings.trim_space(title) == "" {
+				return fail("title is empty"), false
+			}
+			t := &st.tasks[i]
+			if has_title {
+				t.title = title
+			}
+			if has_desc {
+				t.description = desc
+			}
 			return ok_result(task_json(st^, t^)), true
 		}, args)
 }

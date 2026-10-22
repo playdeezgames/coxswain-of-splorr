@@ -14,6 +14,12 @@ List tasks, optionally only those with a status (open, claimed, done), an assign
 
 Input schema: `{"type":"object","properties":{"status":{"type":"string","enum":["open","claimed","done"]},"assignee":{"type":"string"},"project":{"type":"string"},"milestone":{"type":"string"}}}`
 
+## `task_update`
+
+Change a task's title and/or description (give at least one; the title cannot be empty, the description can). Anyone may edit any task, in any status. Status, assignee, project and milestone have their own tools.
+
+Input schema: `{"type":"object","properties":{"id":{"type":"integer"},"title":{"type":"string"},"description":{"type":"string"}},"required":["id"]}`
+
 ## `task_move`
 
 Put a task in a project and optionally one of its milestones, or take it out. Giving project replaces the placement (the milestone is cleared unless given too); giving only milestone keeps the task's project. An empty string clears: project "" removes it from its project and milestone, milestone "" removes it from its milestone.
