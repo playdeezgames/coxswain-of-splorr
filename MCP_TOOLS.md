@@ -44,3 +44,27 @@ Append a note to a task (a handoff, a finding, a question). Anyone may add one.
 
 Input schema: `{"type":"object","properties":{"id":{"type":"integer"},"text":{"type":"string"},"agent":{"type":"string"}},"required":["id","text"]}`
 
+## `agent_register`
+
+Announce this session as an agent (name from agent, else the server's --agent) with an optional line about what it is doing. Registering again just refreshes it. Call agent_heartbeat now and then so others can tell you are alive.
+
+Input schema: `{"type":"object","properties":{"agent":{"type":"string"},"doing":{"type":"string"}}}`
+
+## `agent_heartbeat`
+
+Mark an agent as alive now, optionally updating its doing line. The agent must be registered.
+
+Input schema: `{"type":"object","properties":{"agent":{"type":"string"},"doing":{"type":"string"}}}`
+
+## `agent_list`
+
+List registered agents with seconds since each was last seen, whether it is active (seen within stale_after seconds, default 300), and the tasks it has claimed.
+
+Input schema: `{"type":"object","properties":{"stale_after":{"type":"integer"}}}`
+
+## `agent_unregister`
+
+Remove an agent from the registry. Its claimed tasks stay claimed (release them first, or another agent can release with force).
+
+Input schema: `{"type":"object","properties":{"agent":{"type":"string"}}}`
+

@@ -19,8 +19,8 @@ call :: proc(s: ^Server, name, args_json: string) -> (text: string, is_error: bo
 	return content["text"].(json.String), bool(result["isError"].(json.Boolean))
 }
 
-temp_server :: proc(t: ^testing.T, agent: string) -> Server {
-	dir := fmt.tprintf("/tmp/coxswain_test_%d_%s", os.get_pid(), agent)
+temp_server :: proc(label, agent: string) -> Server {
+	dir := fmt.tprintf("/tmp/coxswain_test_%d_%s", os.get_pid(), label)
 	os.remove_all(dir)
 	s: Server
 	server_init(&s, dir, agent)
@@ -42,7 +42,7 @@ test_initialize_and_list :: proc(t: ^testing.T) {
 
 @(test)
 test_claim_flow :: proc(t: ^testing.T) {
-	s := temp_server(t, "alice")
+	s := temp_server("claim", "alice")
 	defer {os.remove_all(s.dir); server_destroy(&s)}
 
 	text, bad := call(&s, "task_create", `{"title":"first"}`)
@@ -73,7 +73,7 @@ test_claim_flow :: proc(t: ^testing.T) {
 
 @(test)
 test_agent_required :: proc(t: ^testing.T) {
-	s := temp_server(t, "")
+	s := temp_server("noagent", "")
 	defer {os.remove_all(s.dir); server_destroy(&s)}
 	call(&s, "task_create", `{"title":"a"}`)
 	text, bad := call(&s, "task_claim", `{"id":1}`)
@@ -86,4 +86,38 @@ test_tool_docs_current :: proc(t: ^testing.T) {
 	data, err := os.read_entire_file("MCP_TOOLS.md", context.temp_allocator)
 	testing.expect(t, err == nil, "MCP_TOOLS.md missing (run tests from the repo root)")
 	testing.expect(t, string(data) == tool_reference_markdown(), "MCP_TOOLS.md is stale: run ./build.sh docs")
+}
+
+@(test)
+test_agent_heartbeat :: proc(t: ^testing.T) {
+	s := temp_server("heartbeat", "alice")
+	defer {os.remove_all(s.dir); server_destroy(&s)}
+
+	text, bad := call(&s, "agent_heartbeat", `{}`)
+	testing.expect(t, bad && strings.contains(text, "not registered"), text)
+
+	text, bad = call(&s, "agent_register", `{"doing":"writing tests"}`)
+	testing.expect(t, !bad && strings.contains(text, `"active":true`), text)
+	call(&s, "task_create", `{"title":"a"}`)
+	call(&s, "task_claim", `{"id":1}`)
+	text, bad = call(&s, "agent_heartbeat", `{"doing":"still going"}`)
+	testing.expect(t, !bad && strings.contains(text, "still going") && strings.contains(text, `"claimed":[1]`), text)
+
+	// Make alice look old by rewriting her last_seen in the store.
+	{
+		testing.expect(t, store_lock(&s))
+		st, _ := store_load(&s)
+		st.agents[0].last_seen -= 1000
+		store_save(&s, st)
+		store_unlock(&s)
+	}
+	text, _ = call(&s, "agent_list", `{}`)
+	testing.expect(t, strings.contains(text, `"active":false`), text)
+	text, _ = call(&s, "agent_list", `{"stale_after":5000}`)
+	testing.expect(t, strings.contains(text, `"active":true`), text)
+
+	text, bad = call(&s, "agent_unregister", `{}`)
+	testing.expect(t, !bad, text)
+	text, _ = call(&s, "agent_list", `{}`)
+	testing.expect(t, text == "[]", text)
 }

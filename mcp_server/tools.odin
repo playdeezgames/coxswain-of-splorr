@@ -13,6 +13,7 @@ tools :: proc() -> []Tool {
 	sync.once_do(&once, proc() {
 		all.allocator = runtime.default_allocator() // (not a test's tracking allocator: this outlives the test)
 		append(&all, ..task_tools())
+		append(&all, ..agent_tools())
 	})
 	return all[:]
 }

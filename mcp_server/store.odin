@@ -31,10 +31,18 @@ Task :: struct {
 	notes:       []Note,
 }
 
+// A registered session or agent. last_seen is seconds since 1970, set by registering or a heartbeat.
+Agent :: struct {
+	name:      string,
+	doing:     string, // a free-text line about what it is working on
+	last_seen: i64,
+}
+
 // The whole store as it is on disk. Everything loaded is on the temp allocator.
 Store :: struct {
 	next_id: int,
 	tasks:   []Task,
+	agents:  []Agent,
 }
 
 store_path :: proc(s: ^Server, name: string) -> string {
@@ -114,4 +122,17 @@ task_blocked_by_open :: proc(st: Store, t: Task) -> (id: int, blocked: bool) {
 		}
 	}
 	return 0, false
+}
+
+agent_index :: proc(st: Store, name: string) -> int {
+	for a, i in st.agents {
+		if a.name == name {
+			return i
+		}
+	}
+	return -1
+}
+
+now_unix :: proc() -> i64 {
+	return i64(time.to_unix_seconds(time.now()))
 }
