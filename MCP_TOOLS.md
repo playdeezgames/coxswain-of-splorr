@@ -14,6 +14,12 @@ List tasks, optionally only those with a status (open, claimed, done, cancelled)
 
 Input schema: `{"type":"object","properties":{"status":{"type":"string","enum":["open","claimed","done","cancelled"]},"assignee":{"type":"string"},"project":{"type":"string"},"milestone":{"type":"string"},"sort":{"type":"string","enum":["id","priority"]}}}`
 
+## `task_search`
+
+Find tasks whose title, description or notes contain text (case-insensitive), optionally only those with a status, a project or a milestone (milestone needs project). Each match is {matched: the fields that hit (title, description, notes), task: the task in full}, in id order.
+
+Input schema: `{"type":"object","properties":{"text":{"type":"string"},"status":{"type":"string","enum":["open","claimed","done","cancelled"]},"project":{"type":"string"},"milestone":{"type":"string"}},"required":["text"]}`
+
 ## `task_next`
 
 Show the next claimable task: the open task that no unfinished task blocks with the highest priority (lowest id among equals), optionally within a project or milestone (milestone needs project). With claim true it is also claimed for the agent (defaults to the server's --agent name), atomically. Says so, without failing, when nothing is claimable.

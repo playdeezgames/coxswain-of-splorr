@@ -718,3 +718,29 @@ test_rename_and_milestone_done :: proc(t: ^testing.T) {
 	text, bad = call(&s, "milestone_set_done", `{"project":"q","name":"zzz","done":true}`)
 	testing.expect(t, bad && strings.contains(text, "no milestone"), text)
 }
+
+@(test)
+test_task_search :: proc(t: ^testing.T) {
+	s := temp_server("search", "alice")
+	defer server_destroy(&s)
+	call(&s, "project_create", `{"name":"p"}`)
+	call(&s, "task_create", `{"title":"Fix the Widget","project":"p"}`)
+	call(&s, "task_create", `{"title":"b","description":"about a widget too"}`)
+	call(&s, "task_create", `{"title":"c"}`)
+	call(&s, "task_note", `{"id":3,"text":"WIDGET note"}`)
+	call(&s, "task_create", `{"title":"d"}`)
+
+	text, bad := call(&s, "task_search", `{"text":"widget"}`)
+	testing.expect(t, !bad && strings.contains(text, `"matched":["title"]`) && strings.contains(text, `"matched":["description"]`) && strings.contains(text, `"matched":["notes"]`) && !strings.contains(text, `"title":"d"`), text)
+	text, _ = call(&s, "task_search", `{"text":"widget","project":"p"}`)
+	testing.expect(t, strings.contains(text, `"title":"Fix the Widget"`) && !strings.contains(text, `"title":"b"`), text)
+	call(&s, "task_claim", `{"id":2}`)
+	text, _ = call(&s, "task_search", `{"text":"widget","status":"claimed"}`)
+	testing.expect(t, strings.contains(text, `"title":"b"`) && !strings.contains(text, `"title":"c"`), text)
+	text, _ = call(&s, "task_search", `{"text":"nothing here"}`)
+	testing.expect(t, text == "[]", text)
+	text, bad = call(&s, "task_search", `{"text":" "}`)
+	testing.expect(t, bad, text)
+	text, bad = call(&s, "task_search", `{"text":"x","milestone":"m"}`)
+	testing.expect(t, bad && strings.contains(text, "needs project"), text)
+}

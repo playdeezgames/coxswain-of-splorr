@@ -19,6 +19,12 @@ task_tools :: proc() -> []Tool {
 			run = tool_task_list,
 		},
 		{
+			name = "task_search",
+			description = "Find tasks whose title, description or notes contain text (case-insensitive), optionally only those with a status, a project or a milestone (milestone needs project). Each match is {matched: the fields that hit (title, description, notes), task: the task in full}, in id order.",
+			schema = `{"type":"object","properties":{"text":{"type":"string"},"status":{"type":"string","enum":["open","claimed","done","cancelled"]},"project":{"type":"string"},"milestone":{"type":"string"}},"required":["text"]}`,
+			run = tool_task_search,
+		},
+		{
 			name = "task_next",
 			description = "Show the next claimable task: the open task that no unfinished task blocks with the highest priority (lowest id among equals), optionally within a project or milestone (milestone needs project). With claim true it is also claimed for the agent (defaults to the server's --agent name), atomically. Says so, without failing, when nothing is claimable.",
 			schema = `{"type":"object","properties":{"project":{"type":"string"},"milestone":{"type":"string"},"claim":{"type":"boolean"},"agent":{"type":"string"}}}`,
@@ -231,6 +237,67 @@ tool_task_list :: proc(s: ^Server, args: json.Object) -> Tool_Result {
 					continue
 				}
 				fmt.sbprintf(&b, "%s%s", n > 0 ? "," : "", task_json(st^, t))
+				n += 1
+			}
+			strings.write_string(&b, "]")
+			return ok_result(strings.to_string(b)), false
+		}, args)
+}
+
+// Whether text occurs in hay, ignoring case. needle must already be lower case.
+contains_fold :: proc(hay, needle: string) -> bool {
+	return strings.contains(strings.to_lower(hay, context.temp_allocator), needle)
+}
+
+tool_task_search :: proc(s: ^Server, args: json.Object) -> Tool_Result {
+	return with_store(s, proc(s: ^Server, st: ^Store, args: json.Object) -> (Tool_Result, bool) {
+			text, r, ok := need_string(args, "text")
+			if !ok {
+				return r, false
+			}
+			if strings.trim_space(text) == "" {
+				return fail("text is empty"), false
+			}
+			needle := strings.to_lower(text, context.temp_allocator)
+			want_status, has_status := arg_string(args, "status")
+			if has_status && want_status != "open" && want_status != "claimed" && want_status != "done" && want_status != "cancelled" {
+				return fail("status is open, claimed, done or cancelled"), false
+			}
+			want_project, has_project := arg_string(args, "project")
+			want_ms, has_ms := arg_string(args, "milestone")
+			if has_ms && !has_project {
+				return fail("milestone needs project (milestone names are per project)"), false
+			}
+			b := strings.builder_make(context.temp_allocator)
+			strings.write_string(&b, "[")
+			n := 0
+			for t in st.tasks {
+				if has_status && status_name(t.status) != want_status {
+					continue
+				}
+				if has_project && t.project != want_project {
+					continue
+				}
+				if has_ms && t.milestone != want_ms {
+					continue
+				}
+				fields := make([dynamic]string, context.temp_allocator)
+				if contains_fold(t.title, needle) {
+					append(&fields, `"title"`)
+				}
+				if contains_fold(t.description, needle) {
+					append(&fields, `"description"`)
+				}
+				for note in t.notes {
+					if contains_fold(note.text, needle) {
+						append(&fields, `"notes"`)
+						break
+					}
+				}
+				if len(fields) == 0 {
+					continue
+				}
+				fmt.sbprintf(&b, `%s{{"matched":[%s],"task":%s}}`, n > 0 ? "," : "", strings.join(fields[:], ",", context.temp_allocator), task_json(st^, t))
 				n += 1
 			}
 			strings.write_string(&b, "]")
