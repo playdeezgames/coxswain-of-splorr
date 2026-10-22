@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      ODIN_VERSION: dev-2026-07
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Odin
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm
+          mkdir -p "$HOME/odin"
+          curl -fsSL "https://github.com/odin-lang/Odin/releases/download/${ODIN_VERSION}/odin-linux-amd64-${ODIN_VERSION}.tar.gz" \
+            | tar -xz -C "$HOME/odin" --strip-components=1
+          echo "$HOME/odin" >> "$GITHUB_PATH"
+
+      - name: Check
+        run: |
+          odin version
+          ./build.sh check
+
+      - name: Test
+        run: ./build.sh test
+
+      - name: Race (multi-process claims)
+        run: ./build.sh race
