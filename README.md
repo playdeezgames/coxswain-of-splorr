@@ -76,11 +76,25 @@ Without `--agent`, each session passes its own `agent` name on every call, which
 }
 ```
 
-Check the install with `coxswain_mcp --version`, and list the tools with `coxswain_mcp --tools`.
+JSON configs do not expand `~`, so use absolute paths there.
+
+Check the install with `coxswain_mcp --version`, and list the tools with `coxswain_mcp --tools`. In Claude Code, `claude mcp list` should show `coxswain` as connected; start a new session after registering.
 
 ### 4. Tell your sessions how to use it
 
 A registered server only gives a session the tools. To make sessions actually use them, paste [CLAUDE_SNIPPET.md](CLAUDE_SNIPPET.md) into the `CLAUDE.md` of each repo that should track its work here. It tells a session to register, claim before working, leave notes, and complete or release what it holds. Fill in the project name and give each parallel session its own name.
+
+### 5. Try it
+
+Start a Claude Code session and say something like:
+
+> Using the coxswain tools, register as `me`, create a project called `demo` with a task "write a hello-world", then claim the next task, finish it with a note, and show me the task list.
+
+You should see `agent_register`, `project_create`, `task_create`, `task_next`/`task_claim` and `task_complete` calls, and `~/coxswain-tasks/tasks.json` will appear. To test the server without any client, pipe it JSON-RPC lines:
+
+```bash
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | build/coxswain_mcp --dir /tmp/coxswain-try
+```
 
 ## A typical workflow
 
@@ -91,6 +105,16 @@ A registered server only gives a session the tools. To make sessions actually us
 5. **Look in.** Ask any session to list tasks and agents, or open the web view (below).
 
 If a session dies while holding a claim, `agent_list` shows it has gone quiet and `task_release_stale` gives its tasks back.
+
+## Troubleshooting
+
+- **The tools don't appear in a session.** MCP servers load when a session starts; open a new one after `claude mcp add`. Check `claude mcp list`, and that the binary path is absolute and executable.
+- **Two sessions don't see the same tasks.** They are using different `--dir` folders. Point every registration at the same one.
+- **"could not lock the task store" or a wait of several seconds.** A tool waits up to 15 seconds for the lock, then refuses; just retry. On Linux a crashed holder frees the lock automatically.
+- **A claim is refused.** Someone else holds that task. Call `task_next` for another, or `task_list` to see who has what.
+- **A session died holding a claim.** `agent_list` shows it as inactive; `task_release_stale` lists its tasks, and with `release: true` gives them back.
+- **"tasks.json" is refused.** It is not valid JSON, or was written by a newer version of coxswain. It is left untouched so you can look at it; fix it or update the binary.
+- **Rebuilt the repo and sessions behave oddly.** Register the installed copy (`install-mcp`) rather than `build/`, so rebuilds don't replace a binary that sessions are using.
 
 ## Web view
 
