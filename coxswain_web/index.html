@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Coxswain</title>
+<style>
+:root{--bg:#f6f7f9;--panel:#fff;--text:#1d2330;--mute:#6b7385;--line:#e2e5eb;--accent:#2f6fed;
+--open:#2f6fed;--claimed:#c77d0a;--done:#2e8b57;--cancelled:#8a8f9c;--blocked:#c0392b}
+@media(prefers-color-scheme:dark){:root{--bg:#14171d;--panel:#1c2029;--text:#e6e9f0;--mute:#8d96a8;--line:#2b3140;--accent:#6b9bff;
+--open:#6b9bff;--claimed:#e8a53c;--done:#58c08a;--cancelled:#7c8294;--blocked:#ef7a6d}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,sans-serif}
+header{display:flex;gap:12px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:2;flex-wrap:wrap}
+h1{font-size:16px;margin:0}
+#stamp{color:var(--mute);font-size:12px;margin-left:auto}
+main{display:grid;grid-template-columns:260px 1fr;gap:16px;padding:16px;max-width:1300px;margin:auto}
+@media(max-width:800px){main{grid-template-columns:1fr}}
+section{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:16px}
+h2{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--mute);margin:0 0 8px}
+.nav button{display:flex;justify-content:space-between;width:100%;text-align:left;background:none;border:0;color:inherit;font:inherit;padding:5px 8px;border-radius:5px;cursor:pointer}
+.nav button:hover{background:var(--bg)}.nav button.on{background:var(--accent);color:#fff}
+.nav .ms{padding-left:22px;font-size:13px}
+.nav small{opacity:.7}
+.pill{display:inline-block;font-size:11px;padding:1px 7px;border-radius:9px;border:1px solid currentColor;white-space:nowrap}
+.s-open{color:var(--open)}.s-claimed{color:var(--claimed)}.s-done{color:var(--done)}.s-cancelled{color:var(--cancelled)}.blocked{color:var(--blocked)}
+.filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+input,select{background:var(--bg);color:inherit;border:1px solid var(--line);border-radius:5px;padding:5px 8px;font:inherit}
+input{flex:1;min-width:160px}
+.task{border-top:1px solid var(--line);padding:8px 0}
+.task:first-child{border-top:0}
+.row{display:flex;gap:8px;align-items:baseline;cursor:pointer;flex-wrap:wrap}
+.id{color:var(--mute);font-variant-numeric:tabular-nums;min-width:32px}
+.title{font-weight:500;flex:1;min-width:200px}
+.meta{color:var(--mute);font-size:12px}
+.detail{display:none;margin:8px 0 4px 40px;font-size:13px}
+.task.open .detail{display:block}
+.detail pre{white-space:pre-wrap;font:inherit;margin:0 0 8px}
+.note,.ev{border-left:2px solid var(--line);padding-left:8px;margin:4px 0}
+.agent{display:flex;gap:8px;align-items:baseline;padding:6px 0;border-top:1px solid var(--line)}
+.agent:first-of-type{border-top:0}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--cancelled);flex:none;align-self:center}
+.dot.active{background:var(--done)}
+.empty{color:var(--mute);padding:8px 0}
+.bar{height:5px;background:var(--line);border-radius:3px;overflow:hidden;margin-top:4px}
+.bar i{display:block;height:100%;background:var(--done)}
+</style>
+</head>
+<body>
+<header><h1>Coxswain</h1><span id="err" class="blocked"></span><span id="stamp"></span></header>
+<main>
+<div>
+  <section class="nav"><h2>Projects</h2><div id="nav"></div></section>
+  <section><h2>Agents</h2><div id="agents"></div></section>
+</div>
+<section>
+  <h2 id="heading">Tasks</h2>
+  <div id="summary" class="meta" style="margin-bottom:10px"></div>
+  <div class="filters">
+    <input id="q" type="search" placeholder="Search titles, descriptions, notes">
+    <select id="st"><option value="">Active (open + claimed)</option><option value="all">All</option><option>open</option><option>claimed</option><option>done</option><option>cancelled</option></select>
+  </div>
+  <div id="tasks"></div>
+</section>
+</main>
+<script>
+let data=null, sel={project:null,milestone:null}, openIds=new Set();
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const ago=s=>{s=Math.max(0,Math.round(s));if(s<60)return s+'s';if(s<3600)return Math.round(s/60)+'m';if(s<86400)return Math.round(s/3600)+'h';return Math.round(s/86400)+'d'};
+const byId={};
+function blockedTask(t){return (t.blocked_by||[]).some(b=>byId[b]&&!['done','cancelled'].includes(byId[b].status))}
+
+async function load(){
+  try{
+    const r=await fetch('/api/state'); data=await r.json(); $('err').textContent='';
+    $('stamp').textContent='updated '+new Date().toLocaleTimeString();
+    render();
+  }catch(e){$('err').textContent='cannot reach server'}
+}
+
+function counts(tasks){const c={open:0,claimed:0,done:0,cancelled:0};tasks.forEach(t=>c[t.status]++);return c}
+
+function render(){
+  const s=data.store||{}, tasks=(s.tasks||[]).map(t=>({...t,status:String(t.status).toLowerCase()})), projects=s.projects||[], milestones=s.milestones||[], agents=s.agents||[];
+  for(const k in byId)delete byId[k]; tasks.forEach(t=>byId[t.id]=t);
+
+  // nav
+  let h=`<button class="${!sel.project?'on':''}" data-p="">All tasks <small>${tasks.length}</small></button>`;
+  const names=[...new Set([...projects.map(p=>p.name),...tasks.map(t=>t.project).filter(Boolean)])];
+  for(const p of names){
+    const pt=tasks.filter(t=>t.project===p), c=counts(pt), pct=pt.length?Math.round(100*(c.done+c.cancelled)/pt.length):0;
+    h+=`<button class="${sel.project===p&&!sel.milestone?'on':''}" data-p="${esc(p)}">${esc(p)} <small>${c.open+c.claimed} active / ${pt.length}</small></button>`;
+    h+=`<div class="bar" style="margin:0 8px 4px"><i style="width:${pct}%"></i></div>`;
+    for(const m of milestones.filter(m=>m.project===p)){
+      const mt=pt.filter(t=>t.milestone===m.name), mc=counts(mt);
+      h+=`<button class="ms ${sel.project===p&&sel.milestone===m.name?'on':''}" data-p="${esc(p)}" data-m="${esc(m.name)}">${m.done?'✓ ':''}${esc(m.name)} <small>${mc.open+mc.claimed} / ${mt.length}</small></button>`;
+    }
+    const loose=pt.filter(t=>!t.milestone).length;
+    if(loose&&milestones.some(m=>m.project===p))h+=`<button class="ms ${sel.project===p&&sel.milestone===''?'on':''}" data-p="${esc(p)}" data-m="">(no milestone) <small>${loose}</small></button>`;
+  }
+  const none=tasks.filter(t=>!t.project).length;
+  if(none)h+=`<button class="${sel.project==='\u0000'?'on':''}" data-p="\u0000">(no project) <small>${none}</small></button>`;
+  $('nav').innerHTML=h;
+  $('nav').querySelectorAll('button').forEach(b=>b.onclick=()=>{
+    sel.project=b.dataset.p||null; sel.milestone=b.dataset.m===undefined?null:b.dataset.m; render()});
+
+  // agents
+  const stale=300;
+  $('agents').innerHTML=agents.length?agents.slice().sort((a,b)=>b.last_seen-a.last_seen).map(a=>{
+    const age=data.now-a.last_seen, act=age<=stale, mine=tasks.filter(t=>t.status==='claimed'&&t.assignee===a.name);
+    return `<div class="agent"><span class="dot ${act?'active':''}"></span><div><b>${esc(a.name)}</b> <span class="meta">${act?'active':'idle'}, seen ${ago(age)} ago</span>
+      <div>${esc(a.doing)}</div>${mine.map(t=>`<div class="meta">#${t.id} ${esc(t.title)}</div>`).join('')}</div></div>`}).join(''):'<div class="empty">No agents registered</div>';
+
+  // tasks
+  const q=$('q').value.trim().toLowerCase(), st=$('st').value;
+  let list=tasks.filter(t=>{
+    if(sel.project==='\u0000'){if(t.project)return false}
+    else if(sel.project&&t.project!==sel.project)return false;
+    if(sel.milestone!==null&&sel.project&&(t.milestone||'')!==sel.milestone)return false;
+    if(st===''){if(!['open','claimed'].includes(t.status))return false}
+    else if(st!=='all'&&t.status!==st)return false;
+    if(q&&!([t.title,t.description,...(t.notes||[]).map(n=>n.text)].join('\n').toLowerCase().includes(q)))return false;
+    return true;
+  }).sort((a,b)=>(b.priority||0)-(a.priority||0)||a.id-b.id);
+  $('heading').textContent=sel.project==='\u0000'?'No project':sel.project?(sel.project+(sel.milestone?' › '+sel.milestone:'')):'All tasks';
+  const c=counts(tasks);
+  $('summary').textContent=`${list.length} shown · ${c.open} open, ${c.claimed} claimed, ${c.done} done, ${c.cancelled} cancelled (${tasks.length} total)`;
+  $('tasks').innerHTML=list.length?list.map(t=>{
+    const bl=blockedTask(t)&&t.status==='open';
+    return `<div class="task ${openIds.has(t.id)?'open':''}" data-id="${t.id}">
+      <div class="row"><span class="id">#${t.id}</span><span class="title">${esc(t.title)}</span>
+      ${bl?'<span class="pill blocked">blocked</span>':''}
+      <span class="pill s-${t.status}">${t.status}</span>
+      ${t.priority?`<span class="meta">p${t.priority}</span>`:''}
+      ${t.assignee?`<span class="meta">${esc(t.assignee)}</span>`:''}</div>
+      <div class="detail">
+        <div class="meta">${esc(t.project||'')}${t.milestone?' › '+esc(t.milestone):''}${(t.blocked_by||[]).length?' · blocked by '+t.blocked_by.map(b=>'#'+b+(byId[b]?' ('+byId[b].status+')':'')).join(', '):''}</div>
+        <pre>${esc(t.description)}</pre>
+        ${(t.notes||[]).map(n=>`<div class="note"><b>${esc(n.author)}</b>: ${esc(n.text)}</div>`).join('')}
+        ${(t.history||[]).length?`<div class="meta" style="margin-top:6px">History</div>`+t.history.map(e=>`<div class="ev meta">${new Date(e.at*1000).toLocaleString()} · ${esc(e.who)||'?'} ${esc(e.action)} ${esc(e.detail)}</div>`).join(''):''}
+      </div></div>`}).join(''):'<div class="empty">No matching tasks</div>';
+  $('tasks').querySelectorAll('.row').forEach(r=>r.onclick=()=>{
+    const el=r.parentElement, id=+el.dataset.id; el.classList.toggle('open'); el.classList.contains('open')?openIds.add(id):openIds.delete(id)});
+}
+$('q').oninput=render; $('st').onchange=render;
+load(); setInterval(load,5000);
+</script>
+</body>
+</html>

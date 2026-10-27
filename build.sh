@@ -3,6 +3,7 @@
 #   check       type-check every package
 #   test        run every package's tests (from the repo root)
 #   mcp         build/coxswain_mcp, the MCP server
+#   web         build/coxswain_web, a read-only web view of the store (run: build/coxswain_web --dir ~/coxswain-tasks)
 #   race        build, then run N real processes claiming the same tasks (scripts/race.sh [procs] [tasks])
 #   docs        regenerate MCP_TOOLS.md from the tool table
 #   install-mcp a stable copy in ~/.local/bin/coxswain_mcp for other sessions
@@ -10,10 +11,11 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 case "${1:-test}" in
-	check)  odin check mcp_server -no-entry-point; odin check coxswain_mcp ;;
+	check)  odin check mcp_server -no-entry-point; odin check coxswain_mcp; odin check coxswain_web ;;
 	test)   odin test mcp_server ;;
 	race)   shift; ./build.sh mcp && scripts/race.sh "$@" ;;
 	mcp)    mkdir -p build && odin build coxswain_mcp -out:build/coxswain_mcp ;;
+	web)    mkdir -p build && odin build coxswain_web -out:build/coxswain_web ;;
 	docs)   mkdir -p build && odin build coxswain_mcp -out:build/coxswain_mcp && build/coxswain_mcp --tools > MCP_TOOLS.md ;;
 	install-mcp)
 		bin="${COXSWAIN_PREFIX:-$HOME/.local/bin}"
