@@ -20,6 +20,8 @@ claude mcp add --scope user coxswain -- ~/.local/bin/coxswain_mcp --dir ~/coxswa
 
 Run `install-mcp` again when a change should reach those sessions; they pick it up the next time they start (an MCP client launches the binary per session). `COXSWAIN_PREFIX` and `COXSWAIN_TASKS` change the two folders. Register the dev build under another name (`coxswain-dev`) with its own `--dir` to try changes without touching real tasks.
 
+**Web view.** `./build.sh web` builds `build/coxswain_web`; `build/coxswain_web --dir ~/coxswain-tasks` serves a read-only page of projects, milestones, tasks and agents at http://127.0.0.1:8787/ (`--port` changes it). It never writes and listens on loopback only.
+
 **Who is acting.** Every tool that needs an agent takes an `agent` argument, else falls back to the server's `--agent`. A server registered without `--agent` (one shared registration for many sessions) therefore needs `agent` on each call. Only a task's assignee may release or complete it, unless `force` is true.
 
 The reference for every tool (name, what it does, input schema) is [MCP_TOOLS.md](MCP_TOOLS.md), generated from the code; a test fails if it is stale (`./build.sh docs` fixes that).

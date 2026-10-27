@@ -24,7 +24,8 @@ Run the server: `build/coxswain_mcp --dir <task folder> --agent <name>` (also `-
 
 ## Architecture
 
-Modelled on the sibling repo `/home/yermom/git/anvil-of-splorr` (`mcp_server/`, `anvil_mcp/`, `MCP.md`).
+Modelled on the sibling repo `anvil-of-splorr` (`mcp_server/`, `anvil_mcp/`, `MCP.md`).
+- `coxswain_web/` is a read-only local web view (`./build.sh web`; `--dir`, `--port`, default 8787). It listens on 127.0.0.1 only, answers `GET` only, and reads `tasks.json` without the lock (saves are renames, so it always sees a whole file). `/api/state` returns `{now, store}`; `index.html` is embedded with `#load`.
 - `mcp_server/` is a library with no I/O of its own besides the store: `handle_message(&server, bytes) -> (reply, ok)` takes one JSON-RPC 2.0 line (notifications give `ok = false`). Tests call it through the `call` helper in `server_test.odin`.
 - `coxswain_mcp/main.odin` is only the stdio loop: one message per line, replies on stdout, logs on stderr.
 - Tools are a table of `{name, description, schema text, run}`, one `*_tools()` proc per file, joined once (thread-safely) by `tools()` in `tools.odin`. A refusal is `fail(text)` (MCP `isError`), never a crash. `MCP_TOOLS.md` is generated from the table.
