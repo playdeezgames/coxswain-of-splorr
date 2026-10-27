@@ -176,3 +176,45 @@ Delete a milestone. Refused while any task is still in it: move those first.
 
 Input schema: `{"type":"object","properties":{"project":{"type":"string"},"name":{"type":"string"}},"required":["project","name"]}`
 
+## `ship_today`
+
+Ask this before releasing anything: today's date, whether today's one release slot is free (may_ship_now), what holds it if not, the next free day, and the coming schedule. Only one release may go out per day.
+
+Input schema: `{"type":"object","properties":{}}`
+
+## `ship_schedule`
+
+Book a release on a day. The day must be today or later and not held by another release; a refusal names the holder and the next free day. Without date it takes the next free day. Dates are YYYY-MM-DD.
+
+Input schema: `{"type":"object","properties":{"title":{"type":"string"},"date":{"type":"string"},"project":{"type":"string"},"url":{"type":"string"},"note":{"type":"string"},"agent":{"type":"string"}},"required":["title"]}`
+
+## `ship_list`
+
+List releases in date order. Cancelled releases are hidden unless status is cancelled or include_cancelled is true. Optional filters: status (scheduled, shipped, cancelled), project, from and to (inclusive dates).
+
+Input schema: `{"type":"object","properties":{"status":{"type":"string"},"project":{"type":"string"},"from":{"type":"string"},"to":{"type":"string"},"include_cancelled":{"type":"boolean"}}}`
+
+## `ship_reschedule`
+
+Move a scheduled release to another day (today or later, and free).
+
+Input schema: `{"type":"object","properties":{"id":{"type":"integer"},"date":{"type":"string"},"agent":{"type":"string"}},"required":["id","date"]}`
+
+## `ship_update`
+
+Correct a scheduled release: any of title, project, url, note and date (an empty string clears project, url or note). The date follows the same rules as ship_reschedule, and changing only the text never touches the release's day.
+
+Input schema: `{"type":"object","properties":{"id":{"type":"integer"},"title":{"type":"string"},"project":{"type":"string"},"url":{"type":"string"},"note":{"type":"string"},"date":{"type":"string"},"agent":{"type":"string"}},"required":["id"]}`
+
+## `ship_complete`
+
+Record that a scheduled release is now live (call it when you publish, not before). Refused if another release already holds or used today; refused before the release's own day unless force is true (force never gets round the one-a-day rule). The release's date becomes today. url says where it went live.
+
+Input schema: `{"type":"object","properties":{"id":{"type":"integer"},"url":{"type":"string"},"note":{"type":"string"},"force":{"type":"boolean"},"agent":{"type":"string"}},"required":["id"]}`
+
+## `ship_cancel`
+
+Drop a scheduled release; its day becomes free. A release that has shipped cannot be cancelled.
+
+Input schema: `{"type":"object","properties":{"id":{"type":"integer"},"note":{"type":"string"},"agent":{"type":"string"}},"required":["id"]}`
+

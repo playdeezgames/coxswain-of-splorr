@@ -16,6 +16,7 @@ tools :: proc() -> []Tool {
 		append(&all, ..lifecycle_tools())
 		append(&all, ..agent_tools())
 		append(&all, ..project_tools())
+		append(&all, ..ship_tools())
 	})
 	return all[:]
 }

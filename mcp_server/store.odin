@@ -10,7 +10,7 @@ STORE_FILE :: "tasks.json"
 // The on-disk format version. Bump it when the format changes in a way an older server would misread,
 // and migrate older files in store_load. A file without "version" is version 0, the format before
 // versions existed; it is read as it is and gets the current version on its next save.
-STORE_VERSION :: 5 // 2: tasks have a priority; 3: tasks have a history; 4: status Cancelled; 5: milestones have done (the rest absent = empty/0, so older files read as they are)
+STORE_VERSION :: 6 // 2: tasks have a priority; 3: tasks have a history; 4: status Cancelled; 5: milestones have done; 6: ships (the release schedule) (the rest absent = empty/0, so older files read as they are)
 LOCK_WAIT :: 15 * time.Second // how long a tool waits for the lock before refusing
 
 Status :: enum {
@@ -61,6 +61,27 @@ Milestone :: struct {
 	done:        bool, // set by milestone_set_done; says the milestone is finished, whatever its tasks' states
 }
 
+Ship_Status :: enum {
+	Scheduled,
+	Shipped,
+	Cancelled, // dropped; it no longer holds its day
+}
+
+// One release to itch (or anywhere else). The rule: at most one ship that is not cancelled per calendar day,
+// so each day holds either one scheduled ship or one that actually shipped. date is "YYYY-MM-DD" in the
+// server's local time; once Shipped it is the day it really shipped.
+Ship :: struct {
+	id:         int,
+	title:      string,
+	project:    string, // "" = not tied to a project
+	date:       string,
+	status:     Ship_Status,
+	url:        string, // where it went live, set when it ships
+	note:       string,
+	created_by: string,
+	shipped_by: string,
+}
+
 // A registered session or agent. last_seen is seconds since 1970, set by registering or a heartbeat.
 Agent :: struct {
 	name:      string,
@@ -76,6 +97,8 @@ Store :: struct {
 	agents:  []Agent,
 	projects:   []Project,
 	milestones: []Milestone,
+	ships:      []Ship,
+	next_ship_id: int,
 }
 
 store_path :: proc(s: ^Server, name: string) -> string {
@@ -88,7 +111,7 @@ store_path :: proc(s: ^Server, name: string) -> string {
 store_load :: proc(s: ^Server) -> (st: Store, problem: string) {
 	path := store_path(s, STORE_FILE)
 	if !os.exists(path) {
-		return Store{version = STORE_VERSION, next_id = 1}, ""
+		return Store{version = STORE_VERSION, next_id = 1, next_ship_id = 1}, ""
 	}
 	data, err := os.read_entire_file(path, context.temp_allocator)
 	if err != nil {
@@ -103,6 +126,9 @@ store_load :: proc(s: ^Server) -> (st: Store, problem: string) {
 	st.version = STORE_VERSION
 	if st.next_id < 1 {
 		st.next_id = 1
+	}
+	if st.next_ship_id < 1 {
+		st.next_ship_id = 1
 	}
 	return st, ""
 }

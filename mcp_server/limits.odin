@@ -12,6 +12,8 @@ MAX_AGENT_NAME :: 64
 MAX_TASKS :: 10_000
 MAX_NOTES_PER_TASK :: 200
 MAX_AGENTS :: 200
+MAX_SHIPS :: 2_000
+MAX_URL :: 500
 
 // The refusal when text is over max bytes; what names the field ("title", "note", ...).
 too_long :: proc(what, text: string, max: int) -> (res: Tool_Result, ok: bool) {

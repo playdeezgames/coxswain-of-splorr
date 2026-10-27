@@ -34,8 +34,9 @@ The reference for every tool (name, what it does, input schema) is [MCP_TOOLS.md
 | Changing course | `task_cancel`, `task_reopen` | Nothing is ever deleted. A cancelled task no longer blocks anything; reopen a done or cancelled task to bring it back. |
 | Projects | `project_create/list/rename/delete`, `milestone_create/rename/set_done/delete` | Named groups (never numbered). A milestone belongs to one project. Deleting refuses while tasks are in it; renaming carries the tasks along. `project_list` shows task counts by status and each milestone's done flag. |
 | Agents | `agent_register`, `agent_heartbeat`, `agent_list`, `task_release_stale`, `agent_unregister` | Say who is around and what they are doing. An agent is active when seen within `stale_after` seconds (default 300). `task_release_stale` gives back tasks held by an agent that went quiet (list first, then `release` true). |
+| Releases | `ship_today`, `ship_schedule`, `ship_list`, `ship_reschedule`, `ship_update`, `ship_complete`, `ship_cancel` | The release schedule, with one rule: **at most one release a day**. Every release that is not cancelled holds a calendar day (local time), and no two hold the same one. Book with `ship_schedule` (no date = next free day; a taken day is refused with the next free one). Ask `ship_today` before publishing anything, and call `ship_complete` the moment it goes live: it refuses if today already has a release, and before the release's own day unless `force`. |
 
-Limits keep the store small: titles 200, descriptions 10,000, notes 4,000 and `doing` lines 200 bytes; names 64; 10,000 tasks, 200 notes per task, 200 agents. A tool over a limit refuses and names it.
+Limits keep the store small: titles 200, descriptions 10,000, notes 4,000 and `doing` lines 200 bytes; names 64; 10,000 tasks, 200 notes per task, 200 agents, 2,000 releases. A tool over a limit refuses and names it.
 
 ## A typical session
 

@@ -744,3 +744,89 @@ test_task_search :: proc(t: ^testing.T) {
 	text, bad = call(&s, "task_search", `{"text":"x","milestone":"m"}`)
 	testing.expect(t, bad && strings.contains(text, "needs project"), text)
 }
+
+@(test)
+test_ship_one_per_day :: proc(t: ^testing.T) {
+	s := temp_server("ship", "alice")
+	defer {os.remove_all(s.dir); server_destroy(&s)}
+	s.today = "2026-10-27"
+
+	text, bad := call(&s, "ship_schedule", `{"title":"Freedom Haters of Splorr","date":"2026-10-28"}`)
+	testing.expect(t, !bad && strings.contains(text, `"date":"2026-10-28"`), text)
+	text, bad = call(&s, "ship_schedule", `{"title":"Pyramid of Araxis","date":"2026-10-29"}`)
+	testing.expect(t, !bad, text)
+	text, bad = call(&s, "ship_schedule", `{"title":"Third","date":"2026-10-28"}`)
+	testing.expect(t, bad && strings.contains(text, "taken") && strings.contains(text, "next free day is 2026-10-30"), text)
+	text, bad = call(&s, "ship_schedule", `{"title":"Third"}`)
+	testing.expect(t, !bad && strings.contains(text, `"date":"2026-10-27"`), text)
+	text, bad = call(&s, "ship_schedule", `{"title":"Old","date":"2026-10-26"}`)
+	testing.expect(t, bad && strings.contains(text, "past"), text)
+	text, bad = call(&s, "ship_schedule", `{"title":"Bad","date":"2026-02-30"}`)
+	testing.expect(t, bad && strings.contains(text, "not a date"), text)
+
+	// Ship 3 (today). Shipping ship 1 early is refused, and forcing still hits the one-a-day rule.
+	text, bad = call(&s, "ship_complete", `{"id":1}`)
+	testing.expect(t, bad && strings.contains(text, "booked for 2026-10-28"), text)
+	text, bad = call(&s, "ship_complete", `{"id":1,"force":true}`)
+	testing.expect(t, bad && strings.contains(text, "taken"), text)
+	text, bad = call(&s, "ship_complete", `{"id":3,"url":"https://x.itch.io/third"}`)
+	testing.expect(t, !bad && strings.contains(text, `"status":"shipped"`), text)
+
+	text, _ = call(&s, "ship_today", `{}`)
+	testing.expect(t, strings.contains(text, `"may_ship_now":false`) && strings.contains(text, `"next_free_day":"2026-10-30"`), text)
+
+	// Tomorrow.
+	s.today = "2026-10-28"
+	text, _ = call(&s, "ship_today", `{}`)
+	testing.expect(t, strings.contains(text, `"may_ship_now":true`), text)
+	text, bad = call(&s, "ship_complete", `{"id":1}`)
+	testing.expect(t, !bad, text)
+	text, bad = call(&s, "ship_cancel", `{"id":1}`)
+	testing.expect(t, bad, "a shipped release cannot be cancelled")
+	text, bad = call(&s, "ship_cancel", `{"id":2}`)
+	testing.expect(t, !bad, text)
+	text, bad = call(&s, "ship_reschedule", `{"id":2,"date":"2026-10-29"}`)
+	testing.expect(t, bad, "a cancelled release cannot be rescheduled")
+	text, bad = call(&s, "ship_schedule", `{"title":"Pyramid again","date":"2026-10-29"}`)
+	testing.expect(t, !bad, text)
+	text, _ = call(&s, "ship_list", `{"status":"shipped"}`)
+	testing.expect(t, strings.contains(text, `"id":3`) && strings.contains(text, `"id":1`) && !strings.contains(text, `"id":2`), text)
+
+	// Cancelled ships are hidden unless asked for.
+	text, _ = call(&s, "ship_list", `{}`)
+	testing.expect(t, !strings.contains(text, `"id":2`), text)
+	text, _ = call(&s, "ship_list", `{"include_cancelled":true}`)
+	testing.expect(t, strings.contains(text, `"id":2`), text)
+	text, _ = call(&s, "ship_list", `{"status":"cancelled"}`)
+	testing.expect(t, strings.contains(text, `"id":2`), text)
+}
+
+@(test)
+test_ship_update :: proc(t: ^testing.T) {
+	s := temp_server("shipupd", "alice")
+	defer {os.remove_all(s.dir); server_destroy(&s)}
+	s.today = "2026-10-27"
+
+	call(&s, "ship_schedule", `{"title":"Pyramid of Araxis","date":"2026-10-29","note":"n"}`)
+	call(&s, "ship_schedule", `{"title":"Other","date":"2026-10-30"}`)
+
+	text, bad := call(&s, "ship_update", `{"id":1,"title":"Pyramid of Ahraxis","url":"https://x"}`)
+	testing.expect(t, !bad && strings.contains(text, `"title":"Pyramid of Ahraxis"`) && strings.contains(text, `"date":"2026-10-29"`) && strings.contains(text, `"url":"https://x"`), text)
+	text, bad = call(&s, "ship_update", `{"id":1,"note":""}`)
+	testing.expect(t, !bad && strings.contains(text, `"note":""`), text)
+	text, bad = call(&s, "ship_update", `{"id":1,"date":"2026-10-30"}`)
+	testing.expect(t, bad && strings.contains(text, "taken"), text)
+	text, bad = call(&s, "ship_update", `{"id":1,"date":"2026-10-26"}`)
+	testing.expect(t, bad && strings.contains(text, "past"), text)
+	text, bad = call(&s, "ship_update", `{"id":1,"date":"2026-11-01"}`)
+	testing.expect(t, !bad && strings.contains(text, `"date":"2026-11-01"`), text)
+	text, bad = call(&s, "ship_update", `{"id":1,"title":" "}`)
+	testing.expect(t, bad, text)
+	text, bad = call(&s, "ship_update", `{"id":1,"project":"nope"}`)
+	testing.expect(t, bad, text)
+	text, bad = call(&s, "ship_update", `{"id":1}`)
+	testing.expect(t, bad && strings.contains(text, "nothing to change"), text)
+	call(&s, "ship_cancel", `{"id":2}`)
+	text, bad = call(&s, "ship_update", `{"id":2,"title":"x"}`)
+	testing.expect(t, bad, "a cancelled release cannot be edited")
+}
