@@ -33,7 +33,7 @@ Each session launches its own `coxswain_mcp` process, and they all point at the 
 
 ### 1. Build it
 
-You need the [Odin](https://odin-lang.org) compiler, release `dev-2026-07` (the version CI uses). Linux is the supported platform; other platforms build, but use a weaker lock (see [MCP.md](MCP.md)).
+You need the [Odin](https://odin-lang.org) compiler, release `dev-2026-10` (the version CI uses). Linux is the supported platform; other platforms build, but use a weaker lock (see [MCP.md](MCP.md)).
 
 ```bash
 git clone https://github.com/playdeezgames/coxswain-of-splorr.git

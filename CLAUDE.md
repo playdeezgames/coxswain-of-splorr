@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
-Odin `dev-2026-07`; there is no MCP library, so the JSON-RPC layer is hand-written. Run everything from the repo root (a test reads `MCP_TOOLS.md` by relative path).
+Odin `dev-2026-10`; there is no MCP library, so the JSON-RPC layer is hand-written. Run everything from the repo root (a test reads `MCP_TOOLS.md` by relative path).
 
 ```bash
 ./build.sh check         # type-check mcp_server and coxswain_mcp

@@ -8,7 +8,7 @@ claude mcp add coxswain -- "$PWD/build/coxswain_mcp" --dir ~/coxswain-tasks --ag
 build/coxswain_mcp --tools > MCP_TOOLS.md                                       # regenerate the tool reference (./build.sh docs)
 ```
 
-Needs Odin (`dev-2026-07`); there is no other dependency. Run every `./build.sh` target from the repo root.
+Needs Odin (`dev-2026-10`); there is no other dependency. Run every `./build.sh` target from the repo root.
 
 **Dev and prod.** `build/coxswain_mcp` is the development build, rebuilt freely. For other sessions use the installed "prod" copy, which a rebuild never touches:
 

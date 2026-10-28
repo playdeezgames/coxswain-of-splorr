@@ -8,7 +8,7 @@ jobs:
   test:
     runs-on: ubuntu-24.04
     env:
-      ODIN_VERSION: dev-2026-07
+      ODIN_VERSION: dev-2026-10
     steps:
       - uses: actions/checkout@v7
 
