@@ -46,8 +46,8 @@ ship_tools :: proc() -> []Tool {
 		},
 		{
 			name = "ship_complete",
-			description = "Record that a scheduled release is now live (call it when you publish, not before). Refused if another release already holds or used today; refused before the release's own day unless force is true (force never gets round the one-a-day rule). The release's date becomes today. url says where it went live.",
-			schema = `{"type":"object","properties":{"id":{"type":"integer"},"url":{"type":"string"},"note":{"type":"string"},"force":{"type":"boolean"},"agent":{"type":"string"}},"required":["id"]}`,
+			description = "Record that a scheduled release is now live (call it when you publish, not before). Refused if another release already holds or used today; refused before the release's own day unless force is true (force never gets round the one-a-day rule). The release's date becomes today. url says where it went live. shipped_by records who shipped it; if omitted it is the agent argument, else the server's --agent name.",
+			schema = `{"type":"object","properties":{"id":{"type":"integer"},"url":{"type":"string"},"note":{"type":"string"},"force":{"type":"boolean"},"shipped_by":{"type":"string"},"agent":{"type":"string"}},"required":["id"]}`,
 			run = tool_ship_complete,
 		},
 		{
@@ -440,6 +440,12 @@ tool_ship_complete :: proc(s: ^Server, args: json.Object) -> Tool_Result {
 			sh.date = date_text(today)
 			sh.status = .Shipped
 			sh.shipped_by = actor(s, args)
+			if by, has := arg_string(args, "shipped_by"); has && by != "" {
+				if r, ok := too_long("shipped_by", by, MAX_AGENT_NAME); !ok {
+					return r, false
+				}
+				sh.shipped_by = by
+			}
 			if url != "" {
 				sh.url = url
 			}

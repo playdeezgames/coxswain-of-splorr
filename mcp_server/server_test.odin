@@ -746,6 +746,26 @@ test_task_search :: proc(t: ^testing.T) {
 }
 
 @(test)
+test_ship_complete_shipped_by :: proc(t: ^testing.T) {
+	s := temp_server("shipby", "")
+	defer {os.remove_all(s.dir); server_destroy(&s)}
+	s.today = "2026-10-27"
+
+	for title in ([]string{"A", "B", "C"}) {
+		text, bad := call(&s, "ship_schedule", fmt.tprintf(`{{"title":"%s","date":"2026-10-%d"}}`, title, 27 + int(title[0] - 'A')))
+		testing.expect(t, !bad, text)
+	}
+	text, bad := call(&s, "ship_complete", `{"id":1,"shipped_by":"araxis"}`)
+	testing.expect(t, !bad && strings.contains(text, `"shipped_by":"araxis"`), text)
+	s.today = "2026-10-28"
+	text, bad = call(&s, "ship_complete", `{"id":2,"agent":"bob"}`)
+	testing.expect(t, !bad && strings.contains(text, `"shipped_by":"bob"`), text)
+	s.today = "2026-10-29"
+	text, bad = call(&s, "ship_complete", `{"id":3,"agent":"bob","shipped_by":"carol"}`)
+	testing.expect(t, !bad && strings.contains(text, `"shipped_by":"carol"`), text)
+}
+
+@(test)
 test_ship_one_per_day :: proc(t: ^testing.T) {
 	s := temp_server("ship", "alice")
 	defer {os.remove_all(s.dir); server_destroy(&s)}

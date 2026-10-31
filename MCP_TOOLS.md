@@ -208,9 +208,9 @@ Input schema: `{"type":"object","properties":{"id":{"type":"integer"},"title":{"
 
 ## `ship_complete`
 
-Record that a scheduled release is now live (call it when you publish, not before). Refused if another release already holds or used today; refused before the release's own day unless force is true (force never gets round the one-a-day rule). The release's date becomes today. url says where it went live.
+Record that a scheduled release is now live (call it when you publish, not before). Refused if another release already holds or used today; refused before the release's own day unless force is true (force never gets round the one-a-day rule). The release's date becomes today. url says where it went live. shipped_by records who shipped it; if omitted it is the agent argument, else the server's --agent name.
 
-Input schema: `{"type":"object","properties":{"id":{"type":"integer"},"url":{"type":"string"},"note":{"type":"string"},"force":{"type":"boolean"},"agent":{"type":"string"}},"required":["id"]}`
+Input schema: `{"type":"object","properties":{"id":{"type":"integer"},"url":{"type":"string"},"note":{"type":"string"},"force":{"type":"boolean"},"shipped_by":{"type":"string"},"agent":{"type":"string"}},"required":["id"]}`
 
 ## `ship_cancel`
 
